@@ -79,7 +79,6 @@ def main():
             #save parameters every 10 minutes
             if time.time() - start > 600:
                 torch.save(model.state_dict(), "models/model.pt")
-                wandb.save("models/model.pt")
                 start = time.time()
         train_loss /= len(train_loader.dataset)
         # Validation
