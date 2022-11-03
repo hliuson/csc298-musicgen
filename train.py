@@ -4,7 +4,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-import numpy as np
+import wandb
+import time
 
 ### Split the pianorolls into 512-long segments and return a stacked tensor of shape (N, 512, 128),
 def get_cuts(pianorolls):
@@ -12,7 +13,12 @@ def get_cuts(pianorolls):
     for pianoroll in pianorolls:
         for i in range(0, pianoroll.shape[0] - 512, 512):
             cuts.append(torch.Tensor(pianoroll[i : i + 512, :]))
-    return torch.stack(cuts)
+            
+    #Choose 64 random cuts
+    if len(cuts) > 64:
+        cuts = torch.stack(cuts)
+        cuts = cuts[torch.randperm(cuts.shape[0])][:64]
+    return cuts
     
 
 def main():
@@ -27,9 +33,21 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     criterion = nn.CrossEntropyLoss()
 
-    train_loader = DataLoader(dataset, batch_size=32, shuffle=True, collate_fn=get_cuts)
-    val_loader = DataLoader(dataset, batch_size=32, shuffle=False, collate_fn=get_cuts)
+    batch = 1
 
+    train_loader = DataLoader(dataset, batch_size=batch, shuffle=True, collate_fn=get_cuts)
+    val_loader = DataLoader(dataset, batch_size=batch, shuffle=False, collate_fn=get_cuts)
+
+    wandb.init(project="test-project", entity="csc298-hliuson-dchien")
+    wandb.config = {
+        "model": "LSTM",
+        "optimizer": "Adam",
+        "learning_rate": 1e-4,
+        "batch_size": batch,
+    }
+    wandb.watch(model, log="all")
+    
+    start = time.time()
 
     ### Core training loop
     for epoch in range(100):
@@ -45,10 +63,10 @@ def main():
             # Get the rest of the 32 steps
             
             
-            # Compute loss
+            # Compute loss against the last 32 steps
             loss = criterion(
                 outputs,
-                pianorolls[:, 32:, :],
+                pianorolls[:, -32:, :],
             )
             
             # Update model
@@ -56,6 +74,13 @@ def main():
             loss.backward()
             optimizer.step()
             train_loss += loss.item() * pianorolls.shape[0]
+            wandb.log({"train_loss": loss.item()})
+            
+            #save parameters every 10 minutes
+            if time.time() - start > 600:
+                torch.save(model.state_dict(), "models/model.pt")
+                wandb.save("models/model.pt")
+                start = time.time()
         train_loss /= len(train_loader.dataset)
         # Validation
         model.eval()
@@ -68,6 +93,7 @@ def main():
                     outputs.reshape(-1, 128),
                     pianorolls[:, 32:, :].reshape(-1),
                 )
+                wandb.log({"val_loss": loss.item()})
                 val_loss += loss.item() * pianorolls.shape[0]
         val_loss /= len(val_loader.dataset)
         # Print results

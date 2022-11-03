@@ -1,5 +1,4 @@
 import muspy
-import torch
 
 # https://muspy.readthedocs.io/en/latest/datasets/datasets.html
 def get_dataset():
