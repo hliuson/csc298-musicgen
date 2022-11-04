@@ -18,7 +18,7 @@ class LSTMModel(nn.Module):
         #get device 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         for i in range(32):
-            zero = torch.zeros(x.shape[0], 1, 128).to(device)
+            zero = torch.zeros(x.shape[0], 1, 128, device=device)
             output, hc = self.lstm(zero, hc)
             output = self.fc(output).reshape(-1, 1, 128)
             if z is None:
