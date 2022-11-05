@@ -21,16 +21,21 @@ def get_cuts(pianorolls):
     if len(cuts) > max_cuts:
         cuts = torch.stack(cuts)
         cuts = cuts[torch.randperm(cuts.shape[0])][:max_cuts]
-    return cuts.to(device)
+    return cuts
     
 
 def main():
     global data 
     global dataset
+    #silence wandb
+    os.environ['WANDB_SILENT'] = "true"
+    
+    #Load MAESTRO dataset
     data = muspy.datasets.MAESTRODatasetV3(root="data", download_and_extract=True)
     dataset = data.to_pytorch_dataset(
         representation="pianoroll",
     )
+    
     ### Train an LSTM model on the MAESTRO dataset to predict the next 32 steps of a pianoroll.
 
     model = get_baseline_model()
@@ -40,13 +45,16 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     criterion = nn.CrossEntropyLoss()
 
-    batch = 4
+    batch = 1
     
 
-    train_loader = DataLoader(dataset, batch_size=batch, shuffle=True, collate_fn=get_cuts)
-    val_loader = DataLoader(dataset, batch_size=batch, shuffle=False, collate_fn=get_cuts) 
+    train_loader = DataLoader(dataset, batch_size=batch, shuffle=False, collate_fn=get_cuts, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(dataset, batch_size=batch, shuffle=False, collate_fn=get_cuts, num_workers=4, pin_memory=True)
 
-
+    #Why dataset be unable to be pickled? How can you fix it?
+    #Think it through. Answer: 
+    
+    
     epoch = 0
 
     path = "./checkpoints"
@@ -69,8 +77,7 @@ def main():
     else :
         run = None
     
-    #Load wandb run
-    wandb.init(project="test-project", entity="csc298-hliuson-dchien", id=run)
+    
         
     if path == "checkpoints/":
         print("No previous training session found")
@@ -82,6 +89,9 @@ def main():
             "learning_rate": 1e-4,
             "batch_size": batch,
         }
+    else:
+        wandb.init(project="test-project", entity="csc298-hliuson-dchien", id=run)
+        
     wandb.watch(model, log="all")
     
     start = time.time()
