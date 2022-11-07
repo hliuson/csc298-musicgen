@@ -4,22 +4,21 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from data import MidiDataset
 import wandb
 import time
 import os
 
 ### Split the pianorolls into 512-long segments and return a stacked tensor of shape (N, 512, 128),
 def get_cuts(pianorolls):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cuts = []
     for pianoroll in pianorolls:
         for i in range(0, pianoroll.shape[0] - 512, 512):
             cuts.append(torch.Tensor(pianoroll[i : i + 512, :]))
             
     max_cuts = 256
-    
+    cuts = torch.stack(cuts)
     if len(cuts) > max_cuts:
-        cuts = torch.stack(cuts)
         cuts = cuts[torch.randperm(cuts.shape[0])][:max_cuts]
     return cuts
     
@@ -30,11 +29,11 @@ def main():
     #silence wandb
     os.environ['WANDB_SILENT'] = "true"
     
-    #Load MAESTRO dataset
-    data = muspy.datasets.MAESTRODatasetV3(root="data", download_and_extract=True)
-    dataset = data.to_pytorch_dataset(
-        representation="pianoroll",
-    )
+    #Load MAESTRO dataset into folder structure
+    _ = muspy.datasets.MAESTRODatasetV3(root="data", download_and_extract=True)
+    
+    #Define our own dataset class which is pickleable
+    dataset = MidiDataset("data/maestro-v3.0.0")
     
     ### Train an LSTM model on the MAESTRO dataset to predict the next 32 steps of a pianoroll.
 
@@ -46,13 +45,9 @@ def main():
     criterion = nn.CrossEntropyLoss()
 
     batch = 1
-    
 
     train_loader = DataLoader(dataset, batch_size=batch, shuffle=False, collate_fn=get_cuts, num_workers=4, pin_memory=True)
     val_loader = DataLoader(dataset, batch_size=batch, shuffle=False, collate_fn=get_cuts, num_workers=4, pin_memory=True)
-
-    #Why dataset be unable to be pickled? How can you fix it?
-    #Think it through. Answer: 
     
     
     epoch = 0
@@ -104,7 +99,7 @@ def main():
         for n, pianorolls in enumerate(train_loader):
             if n % 100 == 0:
                 print("Epoch: " + str(epoch) + " Batch: " + str(n))
-            
+            pianorolls = pianorolls.to(device)
             
             outputs= model(pianorolls[:, :-32, :])
             # Get the rest of the 32 steps
@@ -127,7 +122,7 @@ def main():
         model.eval()
         val_loss = 0
         with torch.no_grad():
-            for pianorolls, in val_loader:
+            for pianorolls in val_loader:
                 pianorolls = pianorolls.to(device)
                 outputs= model(pianorolls[:, :-32, :])
                 # Get the rest of the 32 steps
