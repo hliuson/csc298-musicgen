@@ -45,6 +45,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
 
     batch = 1
+    threshold = 0.5
 
     train_loader = DataLoader(dataset, batch_size=batch, shuffle=False, collate_fn=get_cuts, num_workers=4, pin_memory=True)
     val_loader = DataLoader(dataset, batch_size=batch, shuffle=False, collate_fn=get_cuts, num_workers=4, pin_memory=True)
@@ -68,13 +69,10 @@ def main():
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         epoch = checkpoint['epoch']
         run = checkpoint['run']
-        print("Loaded model from previous training session")
-    else :
-        run = None
-    
-    
-        
-    if path == "checkpoints/":
+        path = "./checkpoints"
+        print("Continuing previous training session")
+        wandb.init(project="test-project", entity="csc298-hliuson-dchien", resume=run)
+    else:
         print("No previous training session found")
         # Initialize wandb
         wandb.init(project="test-project", entity="csc298-hliuson-dchien")
@@ -83,9 +81,10 @@ def main():
             "optimizer": "Adam",
             "learning_rate": 1e-4,
             "batch_size": batch,
+            "threshold": threshold,
         }
-    else:
-        wandb.init(project="test-project", entity="csc298-hliuson-dchien", id=run)
+
+        
         
     wandb.watch(model, log="all")
     
@@ -96,6 +95,8 @@ def main():
         # Train
         model.train()
         train_loss = 0
+        train_accuracy = 0
+        train_samples = 0
         for n, pianorolls in enumerate(train_loader):
             if n % 100 == 0:
                 print("Epoch: " + str(epoch) + " Batch: " + str(n))
@@ -115,12 +116,18 @@ def main():
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            train_loss += loss.item() * pianorolls.shape[0]
-            wandb.log({"train_loss": loss.item()})
-        train_loss /= len(train_loader.dataset)
+
+            train_loss += loss.item()  * pianorolls.shape[0]
+            #this is an instance of multi-label classification, so we need some threshold to determine if a note is on or off
+            activation = outputs > threshold
+            train_accuracy += (activation == pianorolls[:, -32:, :]).float().mean() * pianorolls.shape[0]
+            train_samples += pianorolls.shape[0]
+        train_loss /= train_samples
         # Validation
         model.eval()
         val_loss = 0
+        val_accuracy = 0
+        val_samples = 0
         with torch.no_grad():
             for pianorolls in val_loader:
                 pianorolls = pianorolls.to(device)
@@ -133,9 +140,13 @@ def main():
                     outputs,
                     pianorolls[:, -32:, :],
                 )
-                wandb.log({"val_loss": loss.item()})
+                #this is an instance of multi-label classification, so we need some threshold to determine if a note is on or off
+                activation = outputs > threshold
+                val_accuracy += (activation == pianorolls[:, -32:, :]).float().mean() * pianorolls.shape[0]
                 val_loss += loss.item() * pianorolls.shape[0]
-        val_loss /= len(val_loader.dataset)
+                val_samples += pianorolls.shape[0]
+        val_loss /= val_samples
+        wandb.log({"train_loss": train_loss, "val_loss": val_loss})
         # Print results
         print(
             f"Epoch {epoch + 1}: "

@@ -11,6 +11,7 @@ class LSTMModel(nn.Module):
             batch_first=True,
         )
         self.fc = nn.Linear(128, 128)
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
         _, hc = self.lstm(x)
@@ -20,6 +21,7 @@ class LSTMModel(nn.Module):
         for i in range(32):
             zero = torch.zeros(x.shape[0], 1, 128, device=device)
             output, hc = self.lstm(zero, hc)
+            output = self.sigmoid(output)
             output = self.fc(output).reshape(-1, 1, 128)
             if z is None:
                 z = output
