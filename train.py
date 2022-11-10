@@ -8,6 +8,8 @@ from data import MidiDataset
 import wandb
 import time
 import os
+import argparse
+import sys
 
 ### Split the pianorolls into 512-long segments and return a stacked tensor of shape (N, 512, 128),
 def get_cuts(pianorolls):
@@ -16,16 +18,20 @@ def get_cuts(pianorolls):
         for i in range(0, pianoroll.shape[0] - 512, 512):
             cuts.append(torch.Tensor(pianoroll[i : i + 512, :]))
             
-    max_cuts = 256
+    max_cuts = 32
     cuts = torch.stack(cuts)
     if len(cuts) > max_cuts:
         cuts = cuts[torch.randperm(cuts.shape[0])][:max_cuts]
     return cuts
-    
 
-def main():
-    global data 
-    global dataset
+def main(*args, **kwargs):
+    #argparse options for new and continue training
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--new', dest='new', action='store_true')
+    parser.add_argument('--continue', dest='new', action='store_false')
+    parser.set_defaults(new=True)
+    args = parser.parse_args(args)
+    
     #silence wandb
     os.environ['WANDB_SILENT'] = "true"
     
@@ -41,7 +47,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = optim.Adam(model.parameters())
     criterion = nn.CrossEntropyLoss()
 
     batch = 1
@@ -59,11 +65,11 @@ def main():
             if file != "checkpoint.pt":
                 continue          
             path = path + "/"+ file
-            print("Found incomplete training session, loading model")
+            print("Found checkpoint file")
             break
     
     #Load model, optimizer, epoch, run
-    if path != "./checkpoints":
+    if path != "./checkpoints" and args.new == False:
         checkpoint = torch.load(path)
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -73,18 +79,16 @@ def main():
         print("Continuing previous training session")
         wandb.init(project="test-project", entity="csc298-hliuson-dchien", resume=run)
     else:
-        print("No previous training session found")
+        print("Starting new training session")
         # Initialize wandb
         wandb.init(project="test-project", entity="csc298-hliuson-dchien")
         wandb.config = {
             "model": "LSTM",
             "optimizer": "Adam",
-            "learning_rate": 1e-4,
+            "learning_rate": 1e-3,
             "batch_size": batch,
             "threshold": threshold,
-        }
-
-        
+        }        
         
     wandb.watch(model, log="all")
     
@@ -120,9 +124,18 @@ def main():
             train_loss += loss.item()  * pianorolls.shape[0]
             #this is an instance of multi-label classification, so we need some threshold to determine if a note is on or off
             activation = outputs > threshold
-            train_accuracy += (activation == pianorolls[:, -32:, :]).float().mean() * pianorolls.shape[0]
+            pianorolls = pianorolls.bool()
+            #Define accuracy as intersection over union of the predicted and actual notes per timestep
+            intersection = (activation & pianorolls[:, -32:, :]).sum(dim=2)
+            union = (activation | pianorolls[:, -32:, :]).sum(dim=2)
+            # if union is 0, then the intersection is also 0, so we can just set the union to 1
+            if (union == 0).any():
+                union[union == 0] = 1
+            # train_accuracy += (intersection / union).sum(dim=1).mean().item() * pianorolls.shape[0]
+            train_accuracy += (intersection / union).mean().item() * pianorolls.shape[0]
             train_samples += pianorolls.shape[0]
         train_loss /= train_samples
+        train_accuracy /= train_samples
         # Validation
         model.eval()
         val_loss = 0
@@ -142,11 +155,18 @@ def main():
                 )
                 #this is an instance of multi-label classification, so we need some threshold to determine if a note is on or off
                 activation = outputs > threshold
-                val_accuracy += (activation == pianorolls[:, -32:, :]).float().mean() * pianorolls.shape[0]
+                pianorolls = pianorolls.bool()
+                #Define accuracy as intersection over union of the predicted and actual notes per timestep
+                intersection = (activation & pianorolls[:, -32:, :]).sum(dim=2)
+                union = (activation | pianorolls[:, -32:, :]).sum(dim=2)
+                if (union == 0).any():
+                    union[union == 0] = 1
+                val_accuracy += (intersection / union).sum(dim=1).mean().item() * pianorolls.shape[0]
                 val_loss += loss.item() * pianorolls.shape[0]
                 val_samples += pianorolls.shape[0]
         val_loss /= val_samples
-        wandb.log({"train_loss": train_loss, "val_loss": val_loss})
+        train_accuracy /= train_samples
+        wandb.log({"train_loss": train_loss, "val_loss": val_loss, "train_accuracy": train_accuracy, "val_accuracy": val_accuracy})
         # Print results
         print(
             f"Epoch {epoch + 1}: "
@@ -171,5 +191,5 @@ def main():
         epoch += 1
 
 if __name__ == '__main__':
-    main()
-    
+    # Run the main function with the arguments passed to the script
+    main(*sys.argv[1:])

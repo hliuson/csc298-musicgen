@@ -6,9 +6,11 @@ class LSTMModel(nn.Module):
         super().__init__()
         self.lstm = nn.LSTM(
             input_size=128,
-            hidden_size=128,
-            num_layers=1,
+            hidden_size=512,
+            proj_size=128,
+            num_layers=6,
             batch_first=True,
+            dropout=0.5,
         )
         self.fc = nn.Linear(128, 128)
         self.sigmoid = nn.Sigmoid()
