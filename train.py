@@ -116,36 +116,17 @@ def train_autoencoder(args, model=None, optimizer=None, epoch=0, train_loader = 
         "num_epochs": 10,
         "model": "ConvAutoEncoder",
     }
-    print("Starting training")
-    for epoch in range(epoch, 10):
+    for epoch in range(epoch, args.epochs):
         model.train()
         train_loss = 0
         for batch_idx, data in enumerate(train_loader):
-            print("Starting batch {}".format(batch_idx))
             data = data.to(device)
-            print("Data loaded to device")
             optimizer.zero_grad()
-            print("Optimizer zeroed")
             output = model(data)
-            print("Output generated")
             loss = criterion(output, data)
-            print("Loss calculated")
             loss.backward()
-            print("Loss backpropagated")
             train_loss += loss.item()
-            print("Loss added to train_loss")
             optimizer.step()
-            print("Optimizer step")
-            wandb.log({"Train Loss": train_loss / (batch_idx + 1)})
-            print(
-                "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
-                    epoch,
-                    batch_idx * len(data),
-                    len(train_loader.dataset),
-                    100.0 * batch_idx / len(train_loader),
-                    loss.item(),
-                )
-            )
         print("====> Epoch: {} Average loss: {:.4f}".format(epoch, train_loss / len(train_loader)))
 
         model.eval()
@@ -155,14 +136,14 @@ def train_autoencoder(args, model=None, optimizer=None, epoch=0, train_loader = 
                 data = data.to(device)
                 output = model(data)
                 val_loss += criterion(output, data).item()
-                wandb.log({"Val Loss": val_loss / (i + 1)})
-                
                 # This is just to log a few examples to wandb
                 if i == 0:
                     n = min(data.size(0), 8)
                     comparison = torch.cat([data[:n], output[:n]])
                     wandb.log({"Reconstruction": [wandb.Image(comparison.cpu())]})
-        
+        wandb.log({"epoch": epoch,
+                   "loss": train_loss / len(train_loader),
+                   "val_loss": val_loss / len(val_loader)})
         torch.save(
             {
                 "model": model,
