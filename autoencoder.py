@@ -17,6 +17,7 @@ class ConvAutoEncoder(torch.nn.Module):
         self.poolFactor = 2**conv_depth
 
         
+        print("Constructing ConvAutoEncoder")
         for i in range(conv_depth):
             if i == 0: 
                 self.encodeConv.add_module(f'conv_{i}', torch.nn.Conv1d(in_channels=128, out_channels=conv_width, kernel_size=3, padding=1))
@@ -26,7 +27,7 @@ class ConvAutoEncoder(torch.nn.Module):
             self.encodeConv.add_module(f'relu_{i}', torch.nn.ReLU())
             self.encodeConv.add_module(f'dropout_{i}', torch.nn.Dropout(dropout))
             self.encodeConv.add_module(f'pool_{i}', torch.nn.MaxPool1d(kernel_size=2))
-        
+        print("Convolutional layers constructed")
         for i in range(fc_depth):
             if i == 0:
                 self.encodeFc.add_module(f'fc_{i}', torch.nn.Linear(32*conv_width // self.poolFactor, fc_width))
@@ -36,7 +37,7 @@ class ConvAutoEncoder(torch.nn.Module):
                 self.encodeFc.add_module(f'fc_{i}', torch.nn.Linear(fc_width, fc_width))
             self.encodeFc.add_module(f'relu_{i}', torch.nn.ReLU())
             self.encodeFc.add_module(f'dropout_{i}', torch.nn.Dropout(dropout))
-            
+        print("Fully connected layers constructed")
         for i in range(fc_depth):
             if i == 0:
                 self.decoderFc.add_module(f'fc_{i}', torch.nn.Linear(encoded_length, fc_width))
@@ -46,7 +47,7 @@ class ConvAutoEncoder(torch.nn.Module):
                 self.decoderFc.add_module(f'fc_{i}', torch.nn.Linear(fc_width, fc_width))
             self.decoderFc.add_module(f'relu_{i}', torch.nn.ReLU())
             self.decoderFc.add_module(f'dropout_{i}', torch.nn.Dropout(dropout))
-            
+        print("Decoder fully connected layers constructed")
         for i in range(conv_depth):
             if i == 0: 
                 self.decoderConv.add_module(f'conv_{i}', torch.nn.ConvTranspose1d(in_channels=conv_width, out_channels=128, kernel_size=3, padding=1))
@@ -56,7 +57,8 @@ class ConvAutoEncoder(torch.nn.Module):
             self.decoderConv.add_module(f'relu_{i}', torch.nn.ReLU())
             self.decoderConv.add_module(f'dropout_{i}', torch.nn.Dropout(dropout))
             self.decoderConv.add_module(f'pool_{i}', torch.nn.MaxUnpool1d(kernel_size=2))
-            
+        print("Decoder convolutional layers constructed")
+        
     def forward(self, x):
         x = self.encodeConv(x)
         x = x.view(x.size(0), -1)
