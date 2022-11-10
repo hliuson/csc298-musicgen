@@ -30,6 +30,3 @@ class LSTMModel(nn.Module):
             else:
                 z = torch.cat((z, output), dim=1)
         return z
-
-def get_baseline_model():
-    return LSTMModel()
