@@ -15,6 +15,7 @@ class ConvAutoEncoder(torch.nn.Module):
         self.decoderFc = torch.nn.Sequential()
         
         self.poolFactor = 2**conv_depth
+
         
         print("Constructing ConvAutoEncoder")
         for i in range(conv_depth):
