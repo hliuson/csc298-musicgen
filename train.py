@@ -136,11 +136,7 @@ def train_autoencoder(args, model=None, optimizer=None, epoch=0, train_loader = 
                 data = data.to(device)
                 output = model(data)
                 val_loss += criterion(output, data).item()
-                # This is just to log a few examples to wandb
-                if i == 0:
-                    n = min(data.size(0), 8)
-                    comparison = torch.cat([data[:n], output[:n]])
-                    wandb.log({"Reconstruction": [wandb.Image(comparison.cpu())]})
+
         wandb.log({"epoch": epoch,
                    "loss": train_loss / len(train_loader),
                    "val_loss": val_loss / len(val_loader)})
