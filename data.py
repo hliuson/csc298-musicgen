@@ -20,19 +20,16 @@ class MidiDataset(torch.utils.data.Dataset):
         return muspy.outputs.pianoroll.to_pianoroll_representation(muspy.read(self.files[self.indices[index]]))
     
 def getdatasets(split = 0.9):
-    print("Loading dataset...")
     root = "./data/maestro-v3.0.0"
     paths = []
     for root, dirs, files in os.walk(root):
         for file in files:
             if file.endswith(".midi"):
                 paths.append(os.path.join(root, file))
-                
-    print("Splitting dataset...")
+
     trainidx = np.random.choice(len(paths), int(len(paths) * split), replace=False)
     testidx = np.setdiff1d(np.arange(len(paths)), trainidx)
     
-    print("Creating datasets...")
     train = MidiDataset(paths, trainidx)
     test = MidiDataset(paths, testidx)
     
