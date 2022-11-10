@@ -51,12 +51,16 @@ def main(*args, **kwargs):
     os.environ['WANDB_SILENT'] = "true"
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    for i in range(torch.cuda.device_count()):
+        print("GPU ", i, ": ", torch.cuda.get_device_name(i))
+    
     cont = args.continueFrom is not None
     if cont:
         if not os.path.exists(args.continueFrom):
             print("Checkpoint file does not exist, starting new run")
             cont = False
-        
+    
+    print("Using device: ", device)
     if cont:
         checkpoint = torch.load(args.continueFrom)
         # verify that the model is the same as the one we are trying to continue training
