@@ -60,12 +60,15 @@ class ConvAutoEncoder(torch.nn.Module):
         print("Decoder convolutional layers constructed")
         
     def forward(self, x):
+        #Conv1d expects data in format (batch, channels, length)
+        x = x.view(x.size(0), 128, -1)
         x = self.encodeConv(x)
         x = x.view(x.size(0), -1)
         x = self.encodeFc(x)
         x = self.decoderFc(x)
         x = x.view(x.size(0), 32 // self.poolFactor, -1)
         x = self.decoderConv(x)
+        x = x.view(x.size(0), -1, 128)
         return x
         
     def encode(self, x):
