@@ -86,11 +86,11 @@ def main(*args, **kwargs):
         print("Must specify a save location")
         return
         
-    dataset = download_dataset()
+    train, test = download_dataset()
     
     if args.autoencoder:
         train_autoencoder(args, model=model, optimizer=optimizer,
-                          epoch=epoch, device=device, dataset = dataset)
+                          epoch=epoch, device=device, train=train, test=test)
     else:
         train_LSTM(args)
 
@@ -99,12 +99,13 @@ def download_dataset():
     _ = muspy.datasets.MAESTRODatasetV3(root="data", download_and_extract=True)
     return getdatasets()
 
-def train_autoencoder(args, model=None, optimizer=None, epoch=0, train_loader = None, val_loader = None, device = None, dataset = None):    
+def train_autoencoder(args, model=None, optimizer=None, epoch=0, train_loader = None, val_loader = None,
+                      device = None, train = None, test = None):
     criterion = nn.MSELoss()
     
-    train_loader = DataLoader(dataset["train"], batch_size=1, shuffle=True, num_workers=4, pin_memory=True, collate_fn=get_mini_cuts)
+    train_loader = DataLoader(train, batch_size=1, shuffle=True, num_workers=4, pin_memory=True, collate_fn=get_mini_cuts)
     
-    val_loader = DataLoader(dataset["test"], batch_size=1, shuffle=True, num_workers=4, pin_memory=True, collate_fn=get_mini_cuts)
+    val_loader = DataLoader(test, batch_size=1, shuffle=True, num_workers=4, pin_memory=True, collate_fn=get_mini_cuts)
     print("Initializing wandb")
     
     # Initialize wandb
