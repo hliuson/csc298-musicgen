@@ -73,6 +73,7 @@ def main(*args, **kwargs):
         epoch = checkpoint['epoch']
         run = checkpoint['run']
         wandb.init(project="test-project", resume="allow", id=run)
+        wandb.watch(model, log="all", log_freq=10)
         
     else:
         if args.autoencoder:
