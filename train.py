@@ -93,16 +93,6 @@ def main(*args, **kwargs):
         
     targs = {'epochs': args.epochs, 'model': model, 'optimizer': optimizer, 'saveTo': args.saveTo, 'train': train, 'test': test, 'epoch': epoch, 'batch_size': 4}
     
-    if args.multigpu:
-        if torch.cuda.device_count() > 1:
-            model = nn.parallel.DistributedDataParallel(model)
-            
-            mp.spawn(train_autoencoder, nprocs=torch.cuda.device_count(), args=(targs,))
-        else:
-            print("WARNING: Multigpu flag set but only one GPU available")
-        
-    
-    
     if args.autoencoder:
         if not args.multigpu:
             train_autoencoder(0, targs)
