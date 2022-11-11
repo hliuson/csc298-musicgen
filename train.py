@@ -30,10 +30,10 @@ def get_cuts(pianorolls):
 # and a tensor of shape (N, 32, 128)
 def get_mini_cuts(pianorolls):
     cuts = []
-    for _ in range(32):
-        pianoroll = pianorolls[np.random.randint(0, len(pianorolls))]
-        start = np.random.randint(0, pianoroll.shape[0] - 32)
-        cuts.append(torch.Tensor(pianoroll[start : start + 32, :]))
+    for pianoroll in pianorolls:
+        for i in range(0, pianoroll.shape[0] - 32, 32):
+            cuts.append(torch.Tensor(pianoroll[i : i + 32, :]))
+    
     return torch.stack(cuts)
 
 def main(*args, **kwargs):
@@ -43,6 +43,7 @@ def main(*args, **kwargs):
     parser.add_argument('--saveTo', type=str, default=None)
     parser.add_argument('--autoencoder', dest='autoencoder', action='store_true')
     parser.add_argument('--LSTM', dest='autoencoder', action='store_false')
+    parser.add_argument('--multigpu', dest='multigpu', action='store_true')
     parser.add_argument('--epochs', type=int, default=10)
     parser.set_defaults(new=True)
     args = parser.parse_args(args)
@@ -60,7 +61,6 @@ def main(*args, **kwargs):
             print("Checkpoint file does not exist, starting new run")
             cont = False
     
-    print("Using device: ", device)
     if cont:
         checkpoint = torch.load(args.continueFrom)
         # verify that the model is the same as the one we are trying to continue training
@@ -87,6 +87,12 @@ def main(*args, **kwargs):
         print("Must specify a save location")
         return
         
+    if args.multigpu:
+        if torch.cuda.device_count() > 1:
+            model = nn.DataParallel(model)
+        else:
+            print("WARNING: Multigpu flag set but only one GPU available")
+        
     train, test = download_dataset()
     
     if args.autoencoder:
@@ -101,12 +107,12 @@ def download_dataset():
     return getdatasets()
 
 def train_autoencoder(args, model=None, optimizer=None, epoch=0, train_loader = None, val_loader = None,
-                      device = None, train = None, test = None):
+                      device = None, train = None, test = None, batch_size = 4):
     criterion = nn.MSELoss()
     
-    train_loader = DataLoader(train, batch_size=1, shuffle=True, num_workers=4, pin_memory=True, collate_fn=get_mini_cuts)
+    train_loader = DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True, collate_fn=get_mini_cuts)
     
-    val_loader = DataLoader(test, batch_size=1, shuffle=True, num_workers=4, pin_memory=True, collate_fn=get_mini_cuts)
+    val_loader = DataLoader(test, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True, collate_fn=get_mini_cuts)
     print("Initializing wandb")
     
     # Initialize wandb
