@@ -38,25 +38,7 @@ def get_mini_cuts(pianorolls):
     
     return torch.stack(cuts)
 
-def main(*args, **kwargs):
-    #argparse options for new and continue training
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--continueFrom', type=str, default=None)
-    parser.add_argument('--saveTo', type=str, default=None)
-    parser.add_argument('--autoencoder', dest='autoencoder', action='store_true')
-    parser.add_argument('--LSTM', dest='autoencoder', action='store_false')
-    parser.add_argument('--multigpu', dest='multigpu', action='store_true')
-    parser.add_argument('--epochs', type=int, default=10)
-    parser.set_defaults(new=True)
-    args = parser.parse_args(args)
-    
-    #silence wandb
-    os.environ['WANDB_SILENT'] = "true"
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    for i in range(torch.cuda.device_count()):
-        print("GPU ", i, ": ", torch.cuda.get_device_name(i))
-    
+def load(args):
     cont = args.continueFrom is not None
     if cont:
         if not os.path.exists(args.continueFrom):
@@ -79,28 +61,45 @@ def main(*args, **kwargs):
         
     else:
         if args.autoencoder:
-            model = ConvAutoEncoder().to(device)
+            model = ConvAutoEncoder()
         else: 
-            model = LSTMModel.to(device)
+            model = LSTMModel()
         optimizer = optim.Adam(model.parameters(), lr=1e-3)
         epoch = 0
         
     if args.saveTo is None:
         print("Must specify a save location")
         return
-    
-    train, test = download_dataset()
         
-    targs = {'epochs': args.epochs, 'model': model, 'optimizer': optimizer, 'saveTo': args.saveTo, 'train': train, 'test': test, 'epoch': epoch, 'batch_size': 4}
+    targs = {'epochs': args.epochs, 'model': model, 'optimizer': optimizer, 'saveTo': args.saveTo, 'epoch': epoch, 'batch_size': 4}
+    return targs
 
+def main(*args, **kwargs):
+    #argparse options for new and continue training
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--continueFrom', type=str, default=None)
+    parser.add_argument('--saveTo', type=str, default=None)
+    parser.add_argument('--autoencoder', dest='autoencoder', action='store_true')
+    parser.add_argument('--LSTM', dest='autoencoder', action='store_false')
+    parser.add_argument('--multigpu', dest='multigpu', action='store_true')
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.set_defaults(new=True)
+    args = parser.parse_args(args)
+    
+    #silence wandb
+    os.environ['WANDB_SILENT'] = "true"
+
+    for i in range(torch.cuda.device_count()):
+        print("GPU ", i, ": ", torch.cuda.get_device_name(i))
+        
+    train, test = download_dataset()
     
     if args.autoencoder:
         if not args.multigpu:
-            train_autoencoder(0, targs)
+            train_autoencoder(0, args)
         else:
             world_size = torch.cuda.device_count()
-            model = nn.parallel.DistributedDataParallel(model, device_ids=[range(world_size)])
-            mp.spawn(train_autoencoder, nprocs=world_size, args=(world_size, targs,), join=True)
+            mp.spawn(train_autoencoder, nprocs=world_size, args=(world_size, args, train, test), join=True)
     else:
         train_LSTM(args)
 
@@ -114,20 +113,21 @@ def setup(rank, world_size):
     os.environ['MASTER_PORT'] = '12355'
 
     # initialize the process group
-    dist.init_process_group("gloo", rank=rank, world_size=world_size)
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
-def train_autoencoder(rank, world_size, targs):
+def train_autoencoder(rank, world_size, args, train, test):
+    targs = load(args)
     model = targs['model']
     optimizer = targs['optimizer']
     saveTo = targs['saveTo']
-    train = targs['train']
-    test = targs['test']
     epoch = targs['epoch']
     batch_size = targs['batch_size']
     
     if world_size > 1:
         setup(rank, world_size)
         device = torch.device(rank)
+        model = model.to(device)
+        model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
