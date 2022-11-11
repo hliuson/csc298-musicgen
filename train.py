@@ -56,16 +56,18 @@ def load(args):
         optimizer = checkpoint['optimizer']
         epoch = checkpoint['epoch']
         run = checkpoint['run']
-        wandb.init(project="test-project", resume="allow", id=run)
+        wandb.init(project="test-project", resume="allow", id=run, group="test-group")
         wandb.watch(model, log="all", log_freq=10)
+    else: 
         
-    else:
         if args.autoencoder:
             model = ConvAutoEncoder()
         else: 
             model = LSTMModel()
         optimizer = optim.Adam(model.parameters(), lr=1e-3)
         epoch = 0
+        wandb.init(project="test-project", group="test-group")
+        wandb.watch(model, log="all", log_freq=10)
         
     if args.saveTo is None:
         print("Must specify a save location")
