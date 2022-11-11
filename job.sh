@@ -3,4 +3,4 @@
 hostname
 date
 source /software/miniconda3/4.12.0/bin/activate CSC298-final
-python3 train.py --autoencoder --saveTo test-autoencoder.pt
+python3 train.py --autoencoder --saveTo checkpoints/test-autoencoder.pt --multigpu
