@@ -95,7 +95,7 @@ def main(*args, **kwargs):
     
     if args.multigpu:
         if torch.cuda.device_count() > 1:
-            model = nn.DistributedDataParallel(model)
+            model = nn.parallel.DistributedDataParallel(model)
             
             mp.spawn(train_autoencoder, nprocs=torch.cuda.device_count(), args=(targs,))
         else:
