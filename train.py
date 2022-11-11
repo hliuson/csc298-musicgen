@@ -92,22 +92,14 @@ def main(*args, **kwargs):
     train, test = download_dataset()
         
     targs = {'epochs': args.epochs, 'model': model, 'optimizer': optimizer, 'saveTo': args.saveTo, 'train': train, 'test': test, 'epoch': epoch, 'batch_size': 4}
-    
-    if args.multigpu:
-        if torch.cuda.device_count() > 1:
-            model = nn.parallel.DistributedDataParallel(model)
-            
-            mp.spawn(train_autoencoder, nprocs=torch.cuda.device_count(), args=(targs,))
-        else:
-            print("WARNING: Multigpu flag set but only one GPU available")
-        
-    
+
     
     if args.autoencoder:
         if not args.multigpu:
             train_autoencoder(0, targs)
         else:
             world_size = torch.cuda.device_count()
+            model = nn.parallel.DistributedDataParallel(model, device_ids=[range(world_size)])
             mp.spawn(train_autoencoder, nprocs=world_size, args=(world_size, targs,), join=True)
     else:
         train_LSTM(args)
@@ -136,7 +128,6 @@ def train_autoencoder(rank, world_size, targs):
     if world_size > 1:
         setup(rank, world_size)
         device = torch.device(rank)
-        model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
