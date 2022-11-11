@@ -4,6 +4,8 @@ import muspy
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.distributed as dist
+import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
 from data import getdatasets
 import wandb
@@ -86,18 +88,27 @@ def main(*args, **kwargs):
     if args.saveTo is None:
         print("Must specify a save location")
         return
+    
+    train, test = download_dataset()
         
+    targs = {'epochs': args.epochs, 'model': model, 'optimizer': optimizer, 'saveTo': args.saveTo, 'train': train, 'test': test, 'epoch': epoch, 'batch_size': 4}
+    
     if args.multigpu:
         if torch.cuda.device_count() > 1:
-            model = nn.DataParallel(model)
+            model = nn.DistributedDataParallel(model)
+            
+            mp.spawn(train_autoencoder, nprocs=torch.cuda.device_count(), args=(targs,))
         else:
             print("WARNING: Multigpu flag set but only one GPU available")
         
-    train, test = download_dataset()
+    
     
     if args.autoencoder:
-        train_autoencoder(args, model=model, optimizer=optimizer,
-                          epoch=epoch, device=device, train=train, test=test)
+        if not args.multigpu:
+            train_autoencoder(0, targs)
+        else:
+            world_size = torch.cuda.device_count()
+            mp.spawn(train_autoencoder, nprocs=world_size, args=(world_size, targs,), join=True)
     else:
         train_LSTM(args)
 
@@ -106,56 +117,69 @@ def download_dataset():
     _ = muspy.datasets.MAESTRODatasetV3(root="data", download_and_extract=True)
     return getdatasets()
 
-def train_autoencoder(args, model=None, optimizer=None, epoch=0, train_loader = None, val_loader = None,
-                      device = None, train = None, test = None, batch_size = 4):
+def setup(rank, world_size):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+
+    # initialize the process group
+    dist.init_process_group("gloo", rank=rank, world_size=world_size)
+
+def train_autoencoder(rank, world_size, targs):
+    setup(rank, world_size)
+    
+    #Multi-gpu
+    device = torch.device(rank)
+    
+    model = targs['model']
+    optimizer = targs['optimizer']
+    saveTo = targs['saveTo']
+    train = targs['train']
+    test = targs['test']
+    epoch = targs['epoch']
+    batch_size = targs['batch_size']
+    
+    train_losses = []
+    test_losses = []
+    
+    train_loader = DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=get_mini_cuts)
+    test_loader = DataLoader(test, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=get_mini_cuts)
+        
     criterion = nn.MSELoss()
     
-    train_loader = DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True, collate_fn=get_mini_cuts)
-    
-    val_loader = DataLoader(test, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True, collate_fn=get_mini_cuts)
-    print("Initializing wandb")
-    
-    # Initialize wandb
-    wandb.init(project="test-project", entity="csc298-hliuson-dchien")
-    wandb.config = {
-        "learning_rate": 1e-3,
-        "batch_size": 1,
-        "num_epochs": 10,
-        "model": "ConvAutoEncoder",
-    }
-    for epoch in range(epoch, args.epochs):
+    for epoch in range(epoch, epoch + targs['epochs']):
         model.train()
-        train_loss = 0
-        for batch_idx, data in enumerate(train_loader):
-            data = data.to(device)
+        train_losses = []
+        test_losses = []
+        for batch in train_loader:
+            batch = batch.to(device)
             optimizer.zero_grad()
-            output = model(data)
-            loss = criterion(output, data)
+            output = model(batch)
+            loss = criterion(output, batch)
             loss.backward()
-            train_loss += loss.item()
             optimizer.step()
-        print("====> Epoch: {} Average loss: {:.4f}".format(epoch, train_loss / len(train_loader)))
-
+            train_losses.append(loss.item())
+            
         model.eval()
-        val_loss = 0
         with torch.no_grad():
-            for i, data in enumerate(val_loader):
-                data = data.to(device)
-                output = model(data)
-                val_loss += criterion(output, data).item()
-
-        wandb.log({"epoch": epoch,
-                   "loss": train_loss / len(train_loader),
-                   "val_loss": val_loss / len(val_loader)})
-        torch.save(
-            {
-                "model": model,
-                "optimizer": optimizer,
-                "epoch": epoch,
-                "run": wandb.run.id,
-            },
-            args.saveTo,
-        )
+            for batch in test_loader:
+                batch = batch.to(device)
+                output = model(batch)
+                loss = criterion(output, batch)
+                test_losses.append(loss.item())
+        
+        print("Epoch: ", epoch, " Train Loss: ", np.mean(train_losses), " Test Loss: ", np.mean(test_losses))
+        wandb.log({'train_loss': np.mean(train_losses), 'test_loss': np.mean(test_losses), 'epoch': epoch})
+        
+        torch.save({
+            'model': model,
+            'optimizer': optimizer,
+            'epoch': epoch,
+            'train_losses': train_losses,
+            'test_losses': test_losses,
+            'run': wandb.run.id
+        }, saveTo)
+        
+    dist.destroy_process_group()
     
 def train_LSTM(args, model=None, optimizer=None, epoch=0, train_loader = None, val_loader = None, device = None, dataset = None):
 
@@ -270,3 +294,13 @@ def train_LSTM(args, model=None, optimizer=None, epoch=0, train_loader = None, v
 if __name__ == '__main__':
     # Run the main function with the arguments passed to the script
     main(*sys.argv[1:])
+    
+### Empty class which makes passing arguments around easier
+class TrainArgs:
+    def __init__(self, **entries):
+        self.dict = {}
+        for key, value in entries.items():
+            self.dict[key] = value
+    
+    def __item__(self, key):
+        return self.dict[key]
