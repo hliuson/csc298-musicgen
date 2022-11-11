@@ -125,11 +125,6 @@ def setup(rank, world_size):
     dist.init_process_group("gloo", rank=rank, world_size=world_size)
 
 def train_autoencoder(rank, world_size, targs):
-    setup(rank, world_size)
-    
-    #Multi-gpu
-    device = torch.device(rank)
-    
     model = targs['model']
     optimizer = targs['optimizer']
     saveTo = targs['saveTo']
@@ -137,6 +132,13 @@ def train_autoencoder(rank, world_size, targs):
     test = targs['test']
     epoch = targs['epoch']
     batch_size = targs['batch_size']
+    
+    if world_size > 1:
+        setup(rank, world_size)
+        device = torch.device(rank)
+        model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     train_losses = []
     test_losses = []
