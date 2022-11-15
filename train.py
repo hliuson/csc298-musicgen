@@ -74,10 +74,10 @@ def train_autoencoder(args, train, test):
     test_losses = []
     
     if args.batch_size is None:
-        args.batch_size = 8
+        args.batch_size = 1
     
     if args.workers is None:
-        args.workers = 4
+        args.workers = 1
     
     train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True, num_workers=args.workers, collate_fn=get_mini_cuts)
     test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, collate_fn=get_mini_cuts)

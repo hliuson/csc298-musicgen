@@ -85,7 +85,7 @@ class LightningConvAutoencoder(pl.LightningModule):
     def __init__(self, model = None):
         super().__init__()
         if model is None:
-            model = ConvAutoEncoder()
+            model = ConvAutoEncoder(fc_width=256, encoded_length=128, fc_depth=3, conv_depth=2)
         self.model = model
         self.loss = torch.nn.MSELoss()
         
