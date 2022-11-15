@@ -89,8 +89,6 @@ class LightningConvAutoencoder(pl.LightningModule):
         self.model = model
         self.loss = torch.nn.MSELoss()
         
-        self.save_hyperparameters()
-        
     def training_step(self, batch, batch_idx):
         output = self.model(batch)
         loss = self.loss(output, batch)

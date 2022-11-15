@@ -53,9 +53,6 @@ def main(*args, **kwargs):
     
     #silence wandb
     os.environ['WANDB_SILENT'] = "true"
-
-    for i in range(torch.cuda.device_count()):
-        print("GPU ", i, ": ", torch.cuda.get_device_name(i))
         
     train, test = download_dataset()
     
@@ -77,19 +74,19 @@ def train_autoencoder(args, train, test):
     test_losses = []
     
     if args.batch_size is None:
-        args.batch_size = 32
+        args.batch_size = 8
     
     if args.workers is None:
         args.workers = 4
     
     train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True, num_workers=args.workers, collate_fn=get_mini_cuts)
-    test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=True, num_workers=args.workers, collate_fn=get_mini_cuts)
+    test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, collate_fn=get_mini_cuts)
     
     model = LightningConvAutoencoder()
     wandblogger = pl.loggers.WandbLogger(project="test-project")
     trainer = pl.Trainer(default_root_dir=args.saveTo, accelerator="gpu", strategy="ddp",
-                         gpus=torch.cuda.device_count(), max_epochs=args.epochs, logger=wandblogger)
-    trainer.fit(model=model, train_dataloader=train_loader, val_dataloaders=test_loader, ckpt_path=args.loadFrom)
+                         devices=torch.cuda.device_count(), max_epochs=args.epochs, logger=wandblogger)
+    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=test_loader, ckpt_path=args.loadFrom)
     
     
     
