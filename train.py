@@ -100,7 +100,9 @@ def train_autoencoder(args, train, test):
     
     trainer = pl.Trainer(default_root_dir=args.saveTo, accelerator="gpu",
                          devices=torch.cuda.device_count(), max_epochs=args.epochs, logger=wandblogger,)
-    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=test_loader, ckpt_path=args.loadFrom)
+    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=test_loader, ckpt_path=args.loadFrom,
+                callbacks=[pl.callbacks.ModelCheckpoint(dirpath=args.saveTo, monitor="val_loss", mode="min", save_top_k=1, save_last=True, verbose=True),
+                           ])
     
 if __name__ == '__main__':
     # Run the main function with the arguments passed to the script
