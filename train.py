@@ -92,14 +92,10 @@ def train_autoencoder(args, train, test):
     model = LightningConvAutoencoder()
     wandblogger = pl.loggers.WandbLogger(project="test-project")
     
-     #use gloo instead of nccl if we are running on windows
-    if sys.platform == "win32":
-        ddp = pl.strategies.DDPStrategy(process_group_backend="gloo")
-    else:
-        ddp = pl.strategies.DDPStrategy(process_group_baclend="nccl")
+    ddp = pl.strategies.DDPStrategy(process_group_baclend="nccl", find_unused_parameters=False)
     
     trainer = pl.Trainer(default_root_dir=args.saveTo, accelerator="gpu",
-                         devices=torch.cuda.device_count(), max_epochs=args.epochs, logger=wandblogger,)
+                         devices=torch.cuda.device_count(), max_epochs=args.epochs, logger=wandblogger,strategy=ddp)
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=test_loader, ckpt_path=args.loadFrom,
                 callbacks=[pl.callbacks.ModelCheckpoint(dirpath=args.saveTo, monitor="val_loss", mode="min", save_top_k=1, save_last=True, verbose=True),
                            ])
