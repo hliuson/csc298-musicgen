@@ -4,3 +4,5 @@ wandb
 checkpoints
 midi
 cache
+out
+job.sh
