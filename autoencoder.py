@@ -98,7 +98,7 @@ class LightningConvAutoencoder(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         output = self.model(batch)
         loss = self.loss(output, batch)
-        self.log('val_loss', loss)
+        self.log('val_loss', loss, sync_dist=True)
         return {'loss': loss}
 
     def configure_optimizers(self):
