@@ -45,6 +45,8 @@ def main(*args, **kwargs):
     parser.add_argument('--autoencoder', dest='autoencoder', action='store_true')
     parser.add_argument('--LSTM', dest='autoencoder', action='store_false')
     parser.add_argument('--multigpu', dest='multigpu', action='store_true')
+    parser.add_argument('--batch_size', type=int, default=None)
+    parser.add_argument('--workers', type=int, default=None)
     parser.add_argument('--epochs', type=int, default=10)
     parser.set_defaults(new=True)
     args = parser.parse_args(args)
