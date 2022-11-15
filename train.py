@@ -4,8 +4,6 @@ import muspy
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.distributed as dist
-import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
 from data import getdatasets
 import wandb
@@ -14,6 +12,7 @@ import os
 import argparse
 import sys
 import numpy as np
+import pytorch_lightning as pl
 
 ### Split the pianorolls into 512-long segments and return a stacked tensor of shape (N, 512, 128),
 def get_cuts(pianorolls):
@@ -38,48 +37,10 @@ def get_mini_cuts(pianorolls):
     
     return torch.stack(cuts)
 
-def load(args):
-    cont = args.continueFrom is not None
-    if cont:
-        if not os.path.exists(args.continueFrom):
-            print("Checkpoint file does not exist, starting new run")
-            cont = False
-    
-    if cont:
-        checkpoint = torch.load(args.continueFrom)
-        # verify that the model is the same as the one we are trying to continue training
-        if args.autoencoder:
-            assert isinstance(checkpoint['model'], ConvAutoEncoder)
-        if not args.autoencoder:
-            assert isinstance(checkpoint['model'], LSTMModel)
-        model = checkpoint['model']
-        optimizer = checkpoint['optimizer']
-        epoch = checkpoint['epoch']
-        run = checkpoint['run']
-        wandb.init(project="test-project", resume="allow", id=run, group="test-group")
-        wandb.watch(model, log="all", log_freq=10)
-    else: 
-        
-        if args.autoencoder:
-            model = ConvAutoEncoder()
-        else: 
-            model = LSTMModel()
-        optimizer = optim.Adam(model.parameters(), lr=1e-3)
-        epoch = 0
-        wandb.init(project="test-project", group="test-group")
-        wandb.watch(model, log="all", log_freq=10)
-        
-    if args.saveTo is None:
-        print("Must specify a save location")
-        return
-        
-    targs = {'epochs': args.epochs, 'model': model, 'optimizer': optimizer, 'saveTo': args.saveTo, 'epoch': epoch, 'batch_size': 4}
-    return targs
-
 def main(*args, **kwargs):
     #argparse options for new and continue training
     parser = argparse.ArgumentParser()
-    parser.add_argument('--continueFrom', type=str, default=None)
+    parser.add_argument('--loadFrom', type=str, default=None)
     parser.add_argument('--saveTo', type=str, default=None)
     parser.add_argument('--autoencoder', dest='autoencoder', action='store_true')
     parser.add_argument('--LSTM', dest='autoencoder', action='store_false')
@@ -97,11 +58,7 @@ def main(*args, **kwargs):
     train, test = download_dataset()
     
     if args.autoencoder:
-        if not args.multigpu:
-            train_autoencoder(0, args)
-        else:
-            world_size = torch.cuda.device_count()
-            mp.spawn(train_autoencoder, nprocs=world_size, args=(world_size, args, train, test), join=True)
+        train_autoencoder(args, train, test)
     else:
         train_LSTM(args)
 
@@ -110,71 +67,29 @@ def download_dataset():
     _ = muspy.datasets.MAESTRODatasetV3(root="data", download_and_extract=True)
     return getdatasets()
 
-def setup(rank, world_size):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
-
-    # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-
-def train_autoencoder(rank, world_size, args, train, test):
-    targs = load(args)
-    model = targs['model']
-    optimizer = targs['optimizer']
-    saveTo = targs['saveTo']
-    epoch = targs['epoch']
-    batch_size = targs['batch_size']
+def train_autoencoder(args, train, test):
     
-    if world_size > 1:
-        setup(rank, world_size)
-        device = torch.device(rank)
-        model = model.to(device)
-        model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     train_losses = []
     test_losses = []
     
-    train_loader = DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=get_mini_cuts)
-    test_loader = DataLoader(test, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=get_mini_cuts)
-        
-    criterion = nn.MSELoss()
+    if args.batch_size is None:
+        args.batch_size = 32
     
-    for epoch in range(epoch, epoch + targs['epochs']):
-        model.train()
-        train_losses = []
-        test_losses = []
-        for batch in train_loader:
-            batch = batch.to(device)
-            optimizer.zero_grad()
-            output = model(batch)
-            loss = criterion(output, batch)
-            loss.backward()
-            optimizer.step()
-            train_losses.append(loss.item())
-            
-        model.eval()
-        with torch.no_grad():
-            for batch in test_loader:
-                batch = batch.to(device)
-                output = model(batch)
-                loss = criterion(output, batch)
-                test_losses.append(loss.item())
-        
-        print("Epoch: ", epoch, " Train Loss: ", np.mean(train_losses), " Test Loss: ", np.mean(test_losses))
-        wandb.log({'train_loss': np.mean(train_losses), 'test_loss': np.mean(test_losses), 'epoch': epoch})
-        
-        torch.save({
-            'model': model,
-            'optimizer': optimizer,
-            'epoch': epoch,
-            'train_losses': train_losses,
-            'test_losses': test_losses,
-            'run': wandb.run.id
-        }, saveTo)
-        
-    dist.destroy_process_group()
+    if args.workers is None:
+        args.workers = 4
+    
+    train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True, num_workers=args.workers, collate_fn=get_mini_cuts)
+    test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=True, num_workers=args.workers, collate_fn=get_mini_cuts)
+    
+    model = LightningConvAutoencoder()
+    wandblogger = pl.loggers.WandbLogger(project="test-project")
+    trainer = pl.Trainer(default_root_dir=args.saveTo, accelerator="gpu", strategy="ddp",
+                         gpus=torch.cuda.device_count(), max_epochs=args.epochs, logger=wandblogger)
+    trainer.fit(model=model, train_dataloader=train_loader, val_dataloaders=test_loader, ckpt_path=args.loadFrom)
+    
+    
     
 def train_LSTM(args, model=None, optimizer=None, epoch=0, train_loader = None, val_loader = None, device = None, dataset = None):
 

@@ -1,4 +1,7 @@
 import torch
+import torch.optim as optim
+import pytorch_lightning as pl
+
 
 ### Autoencoder for a 32-step pianoroll (shape: (batch_size, 32, 128))
 ### Encoder: Convolutional -> Fully Connected
@@ -77,3 +80,28 @@ class ConvAutoEncoder(torch.nn.Module):
     
     def decode(self, x):
         return self.decoder(x)
+
+class LightningConvAutoencoder(pl.LightningModule):
+    def __init__(self, model = None):
+        super().__init__()
+        if model is None:
+            model = ConvAutoEncoder()
+        self.model = model
+        self.loss = torch.nn.MSELoss()
+        
+        self.save_hyperparameters()
+        
+    def training_step(self, batch, batch_idx):
+        output = self.model(batch)
+        loss = self.loss(output, batch)
+        self.log('train_loss', loss)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        output = self.model(batch)
+        loss = self.loss(output, batch)
+        self.log('val_loss', loss)
+        return loss
+
+    def configure_optimizers(self):
+        return optim.Adam(self.parameters(), lr=1e-3)
