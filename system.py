@@ -5,7 +5,7 @@ import os
 
 print("Available GPUs: ", torch.cuda.device_count())
 for i in range(torch.cuda.device_count()):
-    print(" - GPU ", i, " memory reserved: ", torch.cuda.memory_reserved(i) / 1024 / 1024 / 1024, "GB")
+    print(" - GPU ", i, " memory: ", torch.cuda.get_device_properties(i).total_memory / 1024 / 1024 / 1024, "GB")
 
 #cpus aviailable on this node
 print("Available CPUs: ", psutil.cpu_count(logical=False))
