@@ -49,10 +49,10 @@ def main(*args, **kwargs):
     parser.add_argument('--saveTo', type=str, default=None)
     parser.add_argument('--autoencoder', dest='autoencoder', action='store_true')
     parser.add_argument('--LSTM', dest='autoencoder', action='store_false')
-    parser.add_argument('--multigpu', dest='multigpu', action='store_true')
     parser.add_argument('--batch_size', type=int, default=None)
     parser.add_argument('--workers', type=int, default=None)
     parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--wandbcomment', type=str, default=None)
     parser.set_defaults(new=True)
     args = parser.parse_args(args)
     
@@ -72,33 +72,34 @@ def download_dataset():
     return getdatasets()
 
 def train_autoencoder(args, train, test):
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    train_losses = []
-    test_losses = []
-    
     if args.batch_size is None:
         args.batch_size = 1
     
     if args.workers is None:
         args.workers = 1
     
+    if args.wandbcomment is None:
+        args.wandbcomment = "autoencoder"
+    
     minicuts = MiniCuts()
     
     train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True, num_workers=args.workers, collate_fn=minicuts)
     test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, collate_fn=minicuts)
     
-    model = LightningConvAutoencoder()
+    #model = LightningConvAutoencoder()
+    #model = ReconstructLossAutoencoder()\
+    model = SimpleAutoencoder()
+    
     wandblogger = pl.loggers.WandbLogger(project="test-project")
+    wandblogger.watch(model, log="all")
+    #wandb.config["comment"] = args.wandbcomment
     
     ddp = pl.strategies.DDPStrategy(process_group_backend="nccl", find_unused_parameters=False)
     
     trainer = pl.Trainer(default_root_dir=args.saveTo, accelerator="gpu",
                          devices=torch.cuda.device_count(), max_epochs=args.epochs, logger=wandblogger,strategy=ddp,
                          callbacks=[pl.callbacks.ModelCheckpoint(dirpath=args.saveTo, monitor="val_loss", mode="min", save_top_k=1, save_last=True, verbose=True),])
-    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=test_loader, ckpt_path=args.loadFrom,
-                )
+    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=test_loader, ckpt_path=args.loadFrom)
     
 if __name__ == '__main__':
     # Run the main function with the arguments passed to the script
