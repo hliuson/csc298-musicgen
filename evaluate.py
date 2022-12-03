@@ -1,4 +1,4 @@
-from train import *
+from train_autoencoder import *
 from autoencoder import *
 
 import torch

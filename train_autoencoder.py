@@ -30,16 +30,18 @@ def get_cuts(pianorolls):
         cuts = cuts[torch.randperm(cuts.shape[0])][:max_cuts]
     return cuts
 
-#return 32-long segments of the pianorolls for the autoencoder with random start points,
-# and a tensor of shape (N, 32, 128)
+#return L-long segments of the pianorolls for the autoencoder with random start points,
+# and a tensor of shape (N, L, 128)
 class MiniCuts():
+    def __init__(self, cut_length = 32):
+        self.L = cut_length
+    
     def __call__(self, pianorolls):
         cuts = []
         for pianoroll in pianorolls:
-            for i in range(0, pianoroll.shape[0] - 32, 32):
-                cuts.append(torch.Tensor(pianoroll[i : i + 32, :]))
+            for i in range(0, pianoroll.shape[0] - self.L, self.L):
+                cuts.append(torch.Tensor(pianoroll[i : i + self.L, :]))
         stack = torch.stack(cuts)
-        del cuts
         return stack
 
 def main(*args, **kwargs):
@@ -47,12 +49,12 @@ def main(*args, **kwargs):
     parser = argparse.ArgumentParser()
     parser.add_argument('--loadFrom', type=str, default=None)
     parser.add_argument('--saveTo', type=str, default=None)
-    parser.add_argument('--autoencoder', dest='autoencoder', action='store_true')
-    parser.add_argument('--LSTM', dest='autoencoder', action='store_false')
     parser.add_argument('--batch_size', type=int, default=None)
     parser.add_argument('--workers', type=int, default=None)
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--wandbcomment', type=str, default=None)
+    parser.add_argument('--conv_dim', type=int, default=None)
+    parser.add_argument('--kernel_size', type=int, default=None)
     parser.set_defaults(new=True)
     args = parser.parse_args(args)
     
@@ -61,10 +63,7 @@ def main(*args, **kwargs):
         
     train, test = download_dataset()
     
-    if args.autoencoder:
-        train_autoencoder(args, train, test)
-    else:
-        pass
+    train_autoencoder(args, train, test)
 
 def download_dataset():
     #Load MAESTRO dataset into folder structure
@@ -81,14 +80,12 @@ def train_autoencoder(args, train, test):
     if args.wandbcomment is None:
         args.wandbcomment = "autoencoder"
     
-    minicuts = MiniCuts()
+    minicuts = MiniCuts(cut_length=32)
     
     train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True, num_workers=args.workers, collate_fn=minicuts)
     test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, collate_fn=minicuts)
-    
-    #model = LightningConvAutoencoder()
-    #model = ReconstructLossAutoencoder()\
-    model = SimpleAutoencoder()
+
+    model = ConvAutoencoder()
     
     wandblogger = pl.loggers.WandbLogger(project="test-project")
     wandblogger.watch(model, log="all")
