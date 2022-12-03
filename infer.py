@@ -3,7 +3,7 @@ import os
 import muspy
 import numpy as np
 from data import MidiDataset
-from train import get_cuts
+from train_autoencoder import get_cuts
 from torch.utils.data import DataLoader
 from model import get_baseline_model
 
