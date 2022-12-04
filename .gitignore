@@ -1,0 +1,8 @@
+data
+__pycache__
+wandb
+checkpoints
+midi
+cache
+out
+job.sh
