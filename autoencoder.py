@@ -62,6 +62,7 @@ class SimpleAutoencoder(pl.LightningModule):
         x = x.view(x.size(0), self.seq_length, 128) #(batch, length, channels)
         return x
     
+<<<<<<< HEAD
 class SimpleAutoencoderMLP(pl.LightningModule):
     def __init__(self, conv_dim = 8, kernel = 13, seq_length=32, embed_dim = 128) -> None:
         super().__init__()
@@ -127,6 +128,8 @@ class SimpleAutoencoderMLP(pl.LightningModule):
         x = x.view(x.size(0), self.seq_length, 128) #(batch, length, channels)
         return x
     
+=======
+>>>>>>> 128b10f0ecd08e65846ef9420ef7a19d44135102
 
 #Empirically, large kernel sizes seem to do better.
 #Since we are dealing iwth 1d data, we can use a large kernel size without much of a performance hit.

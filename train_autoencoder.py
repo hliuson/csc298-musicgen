@@ -85,7 +85,11 @@ def train_autoencoder(args, train, test):
     train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True, num_workers=args.workers, collate_fn=minicuts)
     test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, collate_fn=minicuts)
 
+<<<<<<< HEAD
     model = SimpleAutoencoderMLP()
+=======
+    model = ConvAutoencoder()
+>>>>>>> 128b10f0ecd08e65846ef9420ef7a19d44135102
     
     wandblogger = pl.loggers.WandbLogger(project="test-project")
     wandblogger.watch(model, log="all")

@@ -19,7 +19,11 @@ class MidiDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         return muspy.outputs.pianoroll.to_pianoroll_representation(muspy.read(self.files[self.indices[index]]))
     
+<<<<<<< HEAD
 def getdatasets(split = 0.9, embedder = None, L=32, embed_length = 128):
+=======
+def getdatasets(split = 0.9):
+>>>>>>> 128b10f0ecd08e65846ef9420ef7a19d44135102
     root = "./data/maestro-v3.0.0"
     paths = []
     for root, dirs, files in os.walk(root):
@@ -33,6 +37,7 @@ def getdatasets(split = 0.9, embedder = None, L=32, embed_length = 128):
     train = MidiDataset(paths, trainidx)
     test = MidiDataset(paths, testidx)
     
+<<<<<<< HEAD
     if embedder is not None:
         train = EncoderDataset(train, embedder)
         test = EncoderDataset(test, embedder)
@@ -82,6 +87,9 @@ class EncoderDataset(torch.utils.data.Dataset):
         
         return seq
         
+=======
+    return train, test
+>>>>>>> 128b10f0ecd08e65846ef9420ef7a19d44135102
     
     
     

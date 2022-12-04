@@ -50,7 +50,7 @@ def main(*args, **kwargs):
     train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
     test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
     
-    model = TransformerSequence()
+    model = autoLSTM()
     
     wandblogger = pl.loggers.WandbLogger(project="music-transformer")
     wandblogger.watch(model, log="all")
