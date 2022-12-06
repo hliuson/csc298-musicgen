@@ -8,13 +8,15 @@ from PIL import Image as PILImage
 import numpy as np
 
 class autoLSTM(pl.LightningModule):
-    def __init__(self, input_size, hidden_dim, dropout=0.2):
+    def __init__(self, input_size=128, hidden_dim=512, dropout=0):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.input_size = input_size
+        self.dropout = dropout
         self.loss = nn.MSELoss()
+#        self.threshold = 0.5
 
-        self.lstm = nn.LSTM(input_size, hidden_dim, batch_first=True)
+        self.lstm = nn.LSTM(input_size, hidden_dim, num_layers=2, dropout=dropout, batch_first=True)
         self.fc = nn.Sequential(nn.Linear(hidden_dim, input_size)
                             , nn.Sigmoid())
 
@@ -38,6 +40,8 @@ class autoLSTM(pl.LightningModule):
         predicted_embeddings = self.forward(pianorolls[:,:-1,:])
         loss = self.loss(predicted_embeddings, pianorolls[:,:-1,:])
         self.log('val_loss', loss, sync_dist=True)
+#        iou = iou_score(predicted_embeddings, pianorolls[:,1:,:], self.threshold)
+#        self.log('val_iou', iou, sync_dist=True)
         return {'loss': loss}
 
 #    def validation_step(self, batch, batch_idx):
@@ -48,7 +52,7 @@ class autoLSTM(pl.LightningModule):
 #        return {'loss': loss}
 
     def configure_optimizers(self):
-        return optim.Adam(self.parameters(), lr=1e-3, weight_decay=1e-5)
+        return optim.Adam(self.parameters(), lr=5e-7, weight_decay=5e-9)
 
 #    def predict(self, batch, batch_idx, dataloader_idx=None):
 #        threshold = 0.5
