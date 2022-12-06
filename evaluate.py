@@ -1,4 +1,5 @@
 from train_autoencoder import *
+from train_sequence import *
 from autoencoder import *
 
 import torch
@@ -17,18 +18,11 @@ def main(*args, **kwargs):
     parser.add_argument('--name', type=str, default=None)
     
     parse = parser.parse_args(args)
-    if parse.step == 0 or parse.epoch == 0:
-        print("Error: step and epoch must be specified")
-        return
 
-    if parse.name is None:
-        print("Error: name must be specified")
-        return
-    
     #Load model
     #model = ReconstructLossAutoencoder.load_from_checkpoint(f"checkpoints/{parse.name}/epoch={parse.epoch}-step={parse.step}.ckpt")
     #model = SimpleAutoencoder.load_from_checkpoint(f"checkpoints/{parse.name}/epoch={parse.epoch}-step={parse.step}.ckpt")
-    model = SimpleAutoencoder.load_from_checkpoint(f"checkpoints/{parse.name}/last.ckpt")
+    model = load_simpleautoencoder("autoencoder-simple-4-13")
     # Test the model on the test set, and then check iou with different thresholds
     no_examples = 0
     iou = {

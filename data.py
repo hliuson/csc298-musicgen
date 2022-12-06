@@ -44,7 +44,7 @@ def getdatasets(split = 0.9, embedder = None, L=32, embed_length = 128):
 class EncoderDataset(torch.utils.data.Dataset):
     def __init__(self, dataset, embedder, L=32, embed_dim=128, MAX_LEN=256):
         self.dataset = dataset
-        self.embedder = embedder
+        self.embedder = embedder.to("cpu")
         self.L = L
         self.embed_dim = embed_dim
         
