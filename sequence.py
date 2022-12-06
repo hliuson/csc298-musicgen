@@ -13,6 +13,7 @@ from xformers.factory.model_factory import *
 class TransformerSequence(pl.LightningModule):
     def __init__(self, num_heads=4, num_layers=3, embedding_size=128, hidden_size=256) -> None:
         super().__init__()
+        self.save_hyperparameters()
         # Autoregressive Transformer for next-step prediction
         # Inputs/outputs are (batch, seq_len, channels).
     

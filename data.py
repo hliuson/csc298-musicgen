@@ -42,9 +42,9 @@ def getdatasets(split = 0.9, embedder = None, L=32, embed_length = 128):
 #Use the sequence embedder to preprocess the data and save it to disk
 #The sequence embedder takes a sequence of length N and returns a sequence of length N//L.
 class EncoderDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, embedder, L=32, embed_dim=128, MAX_LEN=128):
+    def __init__(self, dataset, embedder, L=32, embed_dim=128, MAX_LEN=256):
         self.dataset = dataset
-        self.embedder = embedder
+        self.embedder = embedder.to("cpu")
         self.L = L
         self.embed_dim = embed_dim
         
@@ -70,7 +70,7 @@ class EncoderDataset(torch.utils.data.Dataset):
         
         #embed the sequence
         with torch.no_grad():
-            seq = self.embedder(seq)
+            seq = self.embedder.encode(seq)
         
         #reshape the sequence into a 2D tensor of shape (num_chunks * L, 128)
         seq = seq.reshape((-1, self.embed_dim))

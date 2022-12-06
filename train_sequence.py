@@ -43,7 +43,7 @@ def main(*args, **kwargs):
         print("Please specify a save location")
         return
         
-    autoencoder = load_simpleautoencoder(model_name)
+    autoencoder = load_autoencoder()
     
     train, test = getdatasets(embedder=autoencoder) #embedded dataset
     
@@ -66,14 +66,6 @@ def main(*args, **kwargs):
 class MemorySummary(pl.Callback):
     def on_train_batch_end(self, *args, **kwargs):
         print(torch.cuda.memory_summary(device=None, abbreviated=False))
-            
-
-def load_simpleautoencoder(model_name):
-    #load the last checkpoint of the model using pytorch-lightning
-    file = os.path.join("checkpoints", model_name, "last.ckpt")
-    model = SimpleAutoencoder.load_from_checkpoint(file, conv_dim=4, kernel=13)
-    model.eval()
-    return model
 
 if __name__ == '__main__':
     main(*sys.argv[1:])
