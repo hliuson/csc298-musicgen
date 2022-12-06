@@ -23,6 +23,8 @@ from lstm import *
 from gru import *
 #from sequence import *
 from model import *
+from infer import *
+import pypianoroll
 
 def main(*args, **kwargs):
     #argparse options
@@ -42,30 +44,36 @@ def main(*args, **kwargs):
     if args.saveTo is None:
         args.saveTo = "predicted"
     
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     #Load the models
-    autoencoder_name = "autoencoder-simple-4-13"
-    autoencoder = load_simpleautoencoder(autoencoder_name)
+    autoencoder = load_autoencoder()
     gru_name = "gru-test"
     gru = load_gru(gru_name)
 
     #Load the input midi file
     input_midi = muspy.outputs.pianoroll.to_pianoroll_representation(muspy.read(args.input))
+    original = input_midi
     input_midi = input_midi[None,:]
     input_midi = EncoderDataset(dataset=input_midi,embedder=autoencoder)
     #Load into dataloader
     dataloader = DataLoader(input_midi, batch_size=1, shuffle=False)
-    print(len(dataloader))
-    #Trainerus=1)
+    #Get shapes of data in dataloader
     trainer = pl.Trainer(accelerator='cpu')
     #Predict
     predictions = trainer.predict(gru, dataloader)
     #Decode
-    #Convert predictions[0] to ndarray
-    predictions = np.array(predictions[0])
-    #decoded = autoencoder.decode(predictions[0])
+    predictions = torch.tensor(predictions[0]).squeeze()
+    decoded = autoencoder.decode(predictions)
+    decoded = decoded.to(device).reshape(-1, 128)
+    print(original.shape, decoded.shape)
     #Turn back to midi output
     #Save to output folder
-    muspy.from_pianoroll_representation(predictions).write(os.path.join(args.saveTo, args.input))
+    activation = decoded > 0.5
+    activation = activation.numpy().astype(int)
+    tempo = 240*np.ones((activation.shape[0], 1))
+    roll = pypianoroll.Multitrack(tracks=[pypianoroll.BinaryTrack(pianoroll=activation)], tempo=tempo)
+    pypianoroll.write(os.path.join(args.saveTo, args.input), roll)
     #Print Done!
     print("Done!")
 

@@ -15,7 +15,9 @@ import wandb
 from autoencoder import *
 from data import getdatasets
 from model import *
-from sequence import *
+#from sequence import *
+from gru import *
+from lstm import *
 
 
 def main(*args, **kwargs):
@@ -46,12 +48,15 @@ def main(*args, **kwargs):
     autoencoder = load_autoencoder()
     
     train, test = getdatasets(embedder=autoencoder) #embedded dataset
-    
+    #For every element in train, normalize the tensor across axis 1
     train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
     test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
     
-    model = TransformerSequence()
-    
+    #model = TransformerSequence()
+    #model = autoGRU()
+    #model = autoLSTM()
+    model = complexLSTM()
+
     wandblogger = pl.loggers.WandbLogger(project="music-transformer")
     wandblogger.watch(model, log="all")
     
