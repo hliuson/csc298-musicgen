@@ -16,7 +16,6 @@ from autoencoder import *
 from data import getdatasets
 from model import *
 from sequence import *
-from midiseq import *
 
 
 def main(*args, **kwargs):
@@ -33,18 +32,20 @@ def main(*args, **kwargs):
     #silence wandb
     os.environ['WANDB_SILENT'] = "true"
     
+    MAX_SEQ_LEN = 512 #can be changed
+    
     if args.saveTo is None:
         print("Please specify a save location")
         return
-        
-    train, test = midi_dataset()
+    
+    train, test = getdatasets() #embedded dataset
     
     train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
     test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
     
-    model = MidiFormer()
+    model = Pianoformer()
     
-    wandblogger = pl.loggers.WandbLogger(project="midi-bert")
+    wandblogger = pl.loggers.WandbLogger(project="music-transformer-raw")
     wandblogger.watch(model, log="all")
     
     ddp = pl.strategies.DDPStrategy(process_group_backend="nccl", find_unused_parameters=False)
@@ -53,6 +54,11 @@ def main(*args, **kwargs):
                          devices=torch.cuda.device_count(), max_epochs=args.epochs, logger=wandblogger,strategy=ddp,
                          callbacks=[pl.callbacks.ModelCheckpoint(dirpath=args.saveTo, monitor="val_loss", mode="min", save_top_k=1, save_last=True, verbose=True),])
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=test_loader, ckpt_path=args.loadFrom)
+    
+#periodically prints memory usage
+class MemorySummary(pl.Callback):
+    def on_train_batch_end(self, *args, **kwargs):
+        print(torch.cuda.memory_summary(device=None, abbreviated=False))
 
 if __name__ == '__main__':
     main(*sys.argv[1:])
