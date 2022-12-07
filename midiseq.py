@@ -20,22 +20,23 @@ class MidiFormer(pl.LightningModule):
         self.max_seq_len = 1024
         
         self.pitch_embed = nn.Embedding(128, self.hparams.pitch_size)
-        self.dur_embed = nn.Embedding(32, self.hparams.dur_size)
-        self.offset_embed = nn.Identity() #dim = 1
+        self.dur_embed = nn.Embedding(128, self.hparams.dur_size)
+        #expand to (batch, len, 1)
+        self.offset_embed = nn.Unflatten(1, (-1, 1))
         
         self.offset_size = 1
         
         #represents special tokens (start, end, pad, mask)
-        self.special_tokens = nn.Embedding(2, self.hparams.pitch_size + self.hparams.dur_size)
-        #0: start
-        #1: end
-        #2: pad
-        #3: mask
+        self.special_tokens = nn.Embedding(100, self.hparams.pitch_size + self.hparams.dur_size)
+        #0: mask
+        #1: pad
+        #2: start
+        #3: end
         
         
-        self.pitch_head = nn.Sequential(nn.Linear(128, 128), nn.Sigmoid())
-        self.dur_head = nn.Sequential(nn.Linear(128, 32), nn.Sigmoid())
-        self.offset_head = nn.Sequential(nn.Linear(128, 128), nn.ReLU())
+        self.pitch_head = nn.Sequential(nn.Linear(128, 128), nn.Softmax(dim=2))
+        self.dur_head = nn.Sequential(nn.Linear(128, 128), nn.Softmax(dim=2))
+        self.offset_head = nn.Sequential(nn.Linear(128, 1), nn.ReLU())
         #sinusoidal positional embedding as a function of time
         #TODO
         self.embed_dim = self.hparams.pitch_size + self.hparams.dur_size + self.offset_size
@@ -88,7 +89,7 @@ class MidiFormer(pl.LightningModule):
             },
             "multi_head_config_cross": {
                 "num_heads": self.hparams.num_heads // 2,
-                "residual_dropout": 0,
+                "residual_dropout": 0.1,
                 "attention": {
                     "name": "nystrom",  # whatever attention mechanism
                     "dropout": 0.1,
@@ -118,17 +119,22 @@ class MidiFormer(pl.LightningModule):
         pos = self.offset_embed(batch[:,:,2].long())
         x = torch.cat((pitch, dur), dim=2)
         
-        #mask out random notes with probability 0.1
-        mask = torch.rand(x.shape, device=self.device) < 0.9 #mwhen random number is less than 0.9, keep the note
+        #[0,1] mask for each token in sequence
+        mask = (torch.rand((x.shape[0], x.shape[1]), device=self.device) < 0.9).long() #mwhen random number is less than 0.9, keep the note
 
-        x = x * mask
-        #replace masked notes with special tokens
-        x = x + self.special_tokens(torch.zeros(x.shape[0], x.shape[1]).long())*(1-mask)
+        #Mask out notes according to mask
+        assert len(x.shape) == 3
+        x = x*mask.unsqueeze(-1)
+        assert len(x.shape) == 3
+        #Add embedding of MASK token where mask is 0
+        MASK = self.special_tokens(torch.zeros((x.shape[0], x.shape[1]), device=self.device).long())*((1-mask).unsqueeze(-1))
+        x = x + MASK
+        assert len(x.shape) == 3
         
         x = torch.cat((x, pos), dim=2)
         
         
-        y = self.model(x)
+        y = self.transformer(x)
         #multiclass cross entropy loss
         pitch_loss = F.cross_entropy(self.pitch_head(y), x[:,:,0].long())
         dur_loss = F.cross_entropy(self.dur_head(y), x[:,:,1].long())
@@ -140,28 +146,30 @@ class MidiFormer(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         #x is (batch, length, channels)
         #embed pitch and duration
+        pitch, dur, pos = batch
         
-        pitch = self.pitch_embed(batch[:,:,0].long())
-        dur = self.dur_embed(batch[:,:,1].long())
-        pos = self.offset_embed(batch[:,:,2].long())
-        x = torch.cat((pitch, dur), dim=2)
+        pitch_emb = self.pitch_embed(pitch.long())
+        dur_emb = self.dur_embed(dur.long())
+        pos_emb = self.offset_embed(pos.long())
+        x = torch.cat((pitch_emb, dur_emb), dim=2)
         
-        #mask out random notes with probability 0.1
-        mask = (torch.rand(x.shape, device=self.device) < 0.9).long() #mwhen random number is less than 0.9, keep the note
+        #[0,1] mask for each token in sequence
+        mask = (torch.rand((x.shape[0], x.shape[1]), device=self.device) < 0.9).long() #mwhen random number is less than 0.9, keep the note
 
-        x = x * mask
+        #Mask out notes according to mask
+        x = x*mask.unsqueeze(-1)
         #Add embedding of MASK token where mask is 0
-        MASK = self.special_tokens(3*torch.ones((1,1,1), device=self.device).long())
-        x = x + (1-mask)*MASK
+        MASK = self.special_tokens(torch.zeros((x.shape[0], x.shape[1]), device=self.device).long())*((1-mask).unsqueeze(-1))
+        x = x + MASK
         
-        x = torch.cat((x, pos), dim=2)
+        x = torch.cat((x, pos_emb), dim=2)
         
         
-        y = self.model(x)
+        y = self.transformer(x)
         #multiclass cross entropy loss
-        pitch_loss = F.cross_entropy(self.pitch_head(y), x[:,:,0].long())
-        dur_loss = F.cross_entropy(self.dur_head(y), x[:,:,1].long())
-        pos_loss = F.mse_loss(self.offset_head(y), x[:,:,2].float())
+        pitch_loss = F.cross_entropy(self.pitch_head(y), pitch)
+        dur_loss = F.cross_entropy(self.dur_head(y), dur)
+        pos_loss = F.mse_loss(self.offset_head(y), pos)
         loss = pitch_loss + dur_loss + pos_loss
         self.log({'val_loss': loss})
         return {'loss': loss}

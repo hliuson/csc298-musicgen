@@ -46,11 +46,15 @@ class MidiTokenDataset(torch.utils.data.Dataset):
         for i, note in enumerate(notes):
             pitches[i] = note.pitch.midi
             if note.duration.quarterLength > 0:
-                durations[i] = 128
+                durations[i] = 127
             else:
                 durations[i] = int(note.duration.quarterLength * 8)
             positions[i] = int(note.offset * 8) #quantize to 1/32nd note resolution
-        return torch.tensor([pitches, durations, positions], dtype=torch.float32).T #shape (num_notes, 3)
+        
+        pitches = torch.from_numpy(pitches)
+        durations = torch.from_numpy(durations)#shape 
+        positions = torch.from_numpy(positions) 
+        return (pitches, durations, positions)
 
         
     

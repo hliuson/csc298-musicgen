@@ -47,10 +47,10 @@ def main(*args, **kwargs):
     wandblogger = pl.loggers.WandbLogger(project="midi-bert")
     wandblogger.watch(model, log="all")
     
-    ddp = pl.strategies.DDPStrategy(process_group_backend="nccl", find_unused_parameters=False)
+    #ddp = pl.strategies.DDPStrategy(process_group_backend="nccl", find_unused_parameters=False)
     
-    trainer = pl.Trainer(default_root_dir=args.saveTo, accelerator="gpu", amp_level="O2", amp_backend="apex",
-                         devices=torch.cuda.device_count(), max_epochs=args.epochs, logger=wandblogger,strategy=ddp,
+    trainer = pl.Trainer(default_root_dir=args.saveTo,  amp_level="O2", amp_backend="apex", #accelerator="gpu",
+                         devices=torch.cuda.device_count(), max_epochs=args.epochs, logger=wandblogger, #strategy=ddp,
                          callbacks=[pl.callbacks.ModelCheckpoint(dirpath=args.saveTo, monitor="val_loss", mode="min", save_top_k=1, save_last=True, verbose=True),])
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=test_loader, ckpt_path=args.loadFrom)
 
