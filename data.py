@@ -1,6 +1,7 @@
 import torch 
 import os
 import muspy
+import music21
 import numpy as np
 
 #The muspy implementation of .to_pytorch_dataset() returns a class which is not pickleable,
@@ -18,6 +19,44 @@ class MidiDataset(torch.utils.data.Dataset):
         return len(self.indices)
     def __getitem__(self, index):
         return muspy.outputs.pianoroll.to_pianoroll_representation(muspy.read(self.files[self.indices[index]]))
+  
+class MidiTokenDataset(torch.utils.data.Dataset):
+    def __init__(self, files, indices):
+        self.files = files
+        self.indices = indices
+        
+    def __len__(self):
+        return len(self.indices)
+    
+    def __getitem__(self, index):
+        #use music21 to tokenize the midi file
+        midi = music21.converter.parse(self.files[self.indices[index]])
+        notes = midi.flat.getElementsByClass('Note')
+        
+        #128 pitches
+        pitches = np.zeros((len(notes)), dtype=np.float32)
+        
+        #durations are quantized into bins with 1/32nd note resolution
+        #A quarter note has duration 1 in midi, under our quantization scheme, a quarter note has duration 8
+        durations = np.zeros((len(notes)), dtype=np.int32)
+        
+        #
+        positions = np.zeros((len(notes)), dtype=np.int32)
+        
+        for i, note in enumerate(notes):
+            pitches[i] = note.pitch.midi
+            if note.duration.quarterLength > 0:
+                durations[i] = 127
+            else:
+                durations[i] = int(note.duration.quarterLength * 8)
+            positions[i] = int(note.offset * 8) #quantize to 1/32nd note resolution
+        
+        pitches = torch.from_numpy(pitches).float()
+        durations = torch.from_numpy(durations).float() 
+        positions = torch.from_numpy(positions).float() 
+        return (pitches, durations, positions)
+
+        
     
 def getdatasets(split = 0.9, embedder = None, L=32, embed_length = 128):
     root = "./data/maestro-v3.0.0"
@@ -38,6 +77,32 @@ def getdatasets(split = 0.9, embedder = None, L=32, embed_length = 128):
         test = EncoderDataset(test, embedder)
     
     return train, test
+
+def midi_dataset(split=0.95):
+    root = "./data/maestro-v3.0.0"
+    paths = []
+    for root, dirs, files in os.walk(root):
+        for file in files:
+            if file.endswith(".midi"):
+                paths.append(os.path.join(root, file))
+
+    trainidx = np.random.choice(len(paths), int(len(paths) * split), replace=False)
+    testidx = np.setdiff1d(np.arange(len(paths)), trainidx)
+    
+    train = MidiTokenDataset(paths, trainidx)
+    test = MidiTokenDataset(paths, testidx)
+    
+    return train, test
+
+def download_lakh():
+    #Load MAESTRO dataset into folder structure
+    #This file is in: /home/username/....
+    #We want: /scratch/username/....
+    
+    
+    datapath = "/home/hliuson/data"
+    _ = muspy.datasets.LakhMIDIDataset(root=datapath, download_and_extract=True)
+    return getdatasets()
 
 #Use the sequence embedder to preprocess the data and save it to disk
 #The sequence embedder takes a sequence of length N and returns a sequence of length N//L.
@@ -83,5 +148,11 @@ class EncoderDataset(torch.utils.data.Dataset):
         return seq
         
     
-    
-    
+def main():
+    train, test = download_lakh()
+    print(len(train), len(test))
+    print(train[0].shape)
+    print(test[0].shape)
+
+if __name__ == "__main__":
+    main()

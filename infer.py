@@ -14,9 +14,9 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     #autoencoder = load_simpleautoencoder("autoencoder-simple-4-13").to(device)
-    #sequence = TransformerSequence.load_from_checkpoint("checkpoints/sequence-transformer-test/last.ckpt").to(device)
+    sequence = TransformerSequence.load_from_checkpoint("checkpoints/sequence-transformer-medium/last.ckpt").to(device)
     autoencoder = load_autoencoder().to(device)
-    train, test = getdatasets()
+    train, test = getdatasets(embedder=load_autoencoder())
     test_loader = DataLoader(test, batch_size=1, shuffle=True, num_workers=1)
     minibatch_loader = DataLoader(test, batch_size=1, shuffle=True, num_workers=1, collate_fn=MiniCuts())
 
@@ -34,15 +34,15 @@ def main():
         "0.8": 0,
         "0.9": 0,
     }
-    with torch.no_grad():
-        for batch_idx, data in enumerate(minibatch_loader):
-            data = data.to(device).reshape(-1, 32, 128)
-            reconstruction = autoencoder(data).reshape(1, -1, 128)
-            data = data.reshape(1, -1, 128)
-            iou = iou_score(reconstruction, data, 0.5)
-            print("IoU for sample {}: {}".format(batch_idx, iou))
-            write_midi("generated/reconstruction_{}.mid".format(batch_idx), reconstruction, 0.5)
-            write_midi("generated/original_{}.mid".format(batch_idx), data, 0.5)
+    #with torch.no_grad():
+    #    for batch_idx, data in enumerate(minibatch_loader):
+    #        data = data.to(device).reshape(-1, 32, 128)
+    #        reconstruction = autoencoder(data).reshape(1, -1, 128)
+    #        data = data.reshape(1, -1, 128)
+    #        iou = iou_score(reconstruction, data, 0.5)
+    #        print("IoU for sample {}: {}".format(batch_idx, iou))
+    #        write_midi("generated/reconstruction_{}.mid".format(batch_idx), reconstruction, 0.5)
+    #        write_midi("generated/original_{}.mid".format(batch_idx), data, 0.5)
     #for i, (embeddings) in enumerate(test_loader):
     #    embeddings = embeddings.to(device).reshape(1, -1, 128)
     #    embeddings = embeddings[:, :64, :]
@@ -51,7 +51,7 @@ def main():
         
         
     
-    '''with torch.no_grad():
+    with torch.no_grad():
         for i, (embeddings) in enumerate(test_loader):
             embeddings = embeddings.to(device).reshape(1, -1, 128)
             embeddings = embeddings[:, :64, :]
@@ -69,7 +69,6 @@ def main():
 
             if i == 20:
                 return
-    '''
 
 def write_midi(filename, data, threshold):
     data = data.cpu().reshape(-1, 128)
@@ -90,3 +89,4 @@ def write_midi(filename, data, threshold):
     
 if __name__ == '__main__':
     main()
+

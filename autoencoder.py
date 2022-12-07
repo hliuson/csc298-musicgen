@@ -130,7 +130,6 @@ class SimpleAutoencoderMLP(pl.LightningModule):
         x = x.view(x.size(0), 128, self.seq_length).float() #(batch, channels, length)
         x = self.encoder(x)
         x = x.view(x.size(0), self.embed_dim) #(batch, channels)
-        
         return x
     
     def decode(self, x):
