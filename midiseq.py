@@ -12,7 +12,8 @@ from xformers.factory.model_factory import *
 
 
 class MidiFormer(pl.LightningModule):
-    def __init__(self, pitch_size=64, dur_size=63, num_layers=4, num_heads=4) -> None:
+    def __init__(self, num_layers=4, num_heads=4, pitch_size=32, dur_size=32, offset_size=32, time_num_size=16, time_denom_size=16,
+                 bar_size = 32, inst_size = 32, tmp_size = 32, vel_size=32, model_dim = 128) -> None:
         super().__init__()
         #save hyperparameters
         self.save_hyperparameters()
@@ -21,13 +22,19 @@ class MidiFormer(pl.LightningModule):
         
         self.pitch_embed = nn.Embedding(128, self.hparams.pitch_size)
         self.dur_embed = nn.Embedding(128, self.hparams.dur_size)
-        #expand to (batch, len, 1)
-        self.offset_embed = nn.Unflatten(1, (-1, 1))
+        self.offset_embed = nn.Embedding(64, self.hparams.offset_size)
+        self.time_num_embed = nn.Embedding(32, self.hparams.time_num_size)
+        self.time_denom_embed = nn.Embedding(32, self.hparams.time_denom_size)
+        self.bar_embed = nn.Embedding(512, self.hparams.bar_size)
+        self.inst_embed = nn.Embedding(128, self.hparams.inst_size)
+        self.tmp_embed = nn.Embedding(32, self.hparams.tmp_size)
+        self.vel_embed = nn.Embedding(32, self.hparams.vel_size)
         
-        self.offset_size = 1
+        self.mixer = nn.Sequential(nn.Linear(self.hparams.pitch_size + self.hparams.dur_size + self.hparams.offset_size + self.hparams.time_num_size + self.hparams.time_denom_size
+                                             + self.hparams.bar_size + self.hparams.inst_size + self.hparams.tmp_size + self.hparams.vel_size, self.hparams.model_dim), nn.ReLU())
         
         #represents special tokens (start, end, pad, mask)
-        self.special_tokens = nn.Embedding(100, self.hparams.pitch_size + self.hparams.dur_size)
+        self.special_tokens = nn.Embedding(4, self.hparams.pitch_size + self.hparams.dur_size)
         #0: mask
         #1: pad
         #2: start
@@ -36,17 +43,20 @@ class MidiFormer(pl.LightningModule):
         
         self.pitch_head = nn.Sequential(nn.Linear(128, 128), nn.Softmax(dim=2))
         self.dur_head = nn.Sequential(nn.Linear(128, 128), nn.Softmax(dim=2))
-        self.offset_head = nn.Sequential(nn.Linear(128, 1), nn.ReLU())
-        #sinusoidal positional embedding as a function of time
-        #TODO
-        self.embed_dim = self.hparams.pitch_size + self.hparams.dur_size + self.offset_size
+        self.offset_head = nn.Sequential(nn.Linear(128, 64), nn.Softmax(dim=2))
+        self.time_num_head = nn.Sequential(nn.Linear(128, 32), nn.Softmax(dim=2))
+        self.time_denom_head = nn.Sequential(nn.Linear(128, 32), nn.Softmax(dim=2))
+        self.bar_head = nn.Sequential(nn.Linear(128, 512), nn.Softmax(dim=2))
+        self.inst_head = nn.Sequential(nn.Linear(128, 128), nn.Softmax(dim=2))
+        self.tmp_head = nn.Sequential(nn.Linear(128, 32), nn.Softmax(dim=2))
+        self.vel_head = nn.Sequential(nn.Linear(128, 32), nn.Softmax(dim=2))
         
         xformer_config = [
         {
             "reversible": False,  # Turn on to test the effect of using reversible layers
             "block_type": "encoder",
             "num_layers": self.hparams.num_layers,
-            "dim_model": self.embed_dim,
+            "dim_model": self.hparam.model_dim,
             "residual_norm_style": "pre",
             "position_encoding_config": {
                 "name": "sine",
@@ -72,7 +82,7 @@ class MidiFormer(pl.LightningModule):
             "reversible": False,  # Turn on to test the effect of using reversible layers
             "block_type": "decoder",
             "num_layers": self.hparams.num_layers,
-            "dim_model": self.embed_dim,
+            "dim_model": self.hparam.model_dim,
             "residual_norm_style": "pre",
             "position_encoding_config": {
                 "name": "sine",
@@ -111,50 +121,32 @@ class MidiFormer(pl.LightningModule):
 
         
     def training_step(self, batch, batch_idx):
-        #x is (batch, length, channels)
-        #embed pitch and duration
-        
-        pitch = self.pitch_embed(batch[:,:,0].long())
-        dur = self.dur_embed(batch[:,:,1].long())
-        pos = self.offset_embed(batch[:,:,2].long())
-        x = torch.cat((pitch, dur), dim=2)
-        
-        #[0,1] mask for each token in sequence
-        mask = (torch.rand((x.shape[0], x.shape[1]), device=self.device) < 0.9).long() #mwhen random number is less than 0.9, keep the note
-
-        #Mask out notes according to mask
-        assert len(x.shape) == 3
-        x = x*mask.unsqueeze(-1)
-        assert len(x.shape) == 3
-        #Add embedding of MASK token where mask is 0
-        MASK = self.special_tokens(torch.zeros((x.shape[0], x.shape[1]), device=self.device).long())*((1-mask).unsqueeze(-1))
-        x = x + MASK
-        assert len(x.shape) == 3
-        
-        x = torch.cat((x, pos), dim=2)
-        
-        
-        y = self.transformer(x)
-        #multiclass cross entropy loss
-        pitch_loss = F.cross_entropy(self.pitch_head(y), x[:,:,0].long())
-        dur_loss = F.cross_entropy(self.dur_head(y), x[:,:,1].long())
-        pos_loss = F.mse_loss(self.offset_head(y), x[:,:,2].float())
-        loss = pitch_loss + dur_loss + pos_loss
-        self.log({'train_loss': loss})
+        loss = self.BERT_step(batch)
+        self.log('train_loss', loss)
         return {'loss': loss}
     
     def validation_step(self, batch, batch_idx):
+        loss = self.BERT_step(batch)
+        self.log('val_loss', loss, sync_dist=True)
+        return {'loss': loss}
+
+    def BERT_step(self, batch):
         #x is (batch, length, channels)
         #embed pitch and duration
-        pitch, dur, pos = batch
+        pitch, dur, off, tden, tnum, bar, inst, tmp, vel = batch
         
-        pitch_emb = self.pitch_embed(pitch.long())
-        dur_emb = self.dur_embed(dur.long())
-        pos_emb = self.offset_embed(pos.long())
-        x = torch.cat((pitch_emb, dur_emb), dim=2)
+        x = torch.cat((self.pitch_embed(pitch),
+                       self.dur_embed(dur),
+                       self.offset_embed(off),
+                       self.time_denom_embed(tden),
+                       self.time_num_embed(tnum),
+                       self.bar_embed(bar),
+                       self.inst_embed(inst),
+                       self.tmp_embed(tmp),
+                       self.vel_embed(vel)), dim=2)
         
         #[0,1] mask for each token in sequence
-        mask = (torch.rand((x.shape[0], x.shape[1]), device=self.device) < 0.9).long() #mwhen random number is less than 0.9, keep the note
+        mask = (torch.rand((x.shape[0], x.shape[1]), device=self.device) < 0.8).long() #mwhen random number is less than 0.8, keep the note
 
         #Mask out notes according to mask
         x = x*mask.unsqueeze(-1)
@@ -162,17 +154,19 @@ class MidiFormer(pl.LightningModule):
         MASK = self.special_tokens(torch.zeros((x.shape[0], x.shape[1]), device=self.device).long())*((1-mask).unsqueeze(-1))
         x = x + MASK
         
-        x = torch.cat((x, pos_emb), dim=2)
-        
-        
         y = self.transformer(x)
         #multiclass cross entropy loss
-        pitch_loss = F.cross_entropy(self.pitch_head(y), pitch)
-        dur_loss = F.cross_entropy(self.dur_head(y), dur)
-        pos_loss = F.mse_loss(self.offset_head(y), pos)
-        loss = pitch_loss + dur_loss + pos_loss
-        self.log({'val_loss': loss})
-        return {'loss': loss}
-
+        pitch_loss = F.cross_entropy(self.pitch_head(y), F.one_hot(pitch.long(), num_classes=128).float())
+        dur_loss = F.cross_entropy(self.dur_head(y), F.one_hot(dur.long(), num_classes=128).float())
+        offset_loss = F.cross_entropy(self.offset_head(y), F.one_hot(off.long(), num_classes=128).float())
+        tden_loss = F.cross_entropy(self.time_denom_head(y), F.one_hot(tden.long(), num_classes=32).float())
+        tnum_loss = F.cross_entropy(self.time_num_head(y), F.one_hot(tnum.long(), num_classes=32).float())
+        bar_loss = F.cross_entropy(self.bar_head(y), F.one_hot(bar.long(), num_classes=512).float())
+        inst_loss = F.cross_entropy(self.inst_head(y), F.one_hot(inst.long(), num_classes=128).float())
+        tmp_loss = F.cross_entropy(self.tmp_head(y), F.one_hot(tmp.long(), num_classes=32).float())
+        vel_loss = F.cross_entropy(self.vel_head(y), F.one_hot(vel.long(), num_classes=32).float())
+        loss = pitch_loss + dur_loss + offset_loss + tden_loss + tnum_loss + bar_loss + inst_loss + tmp_loss + vel_loss
+        return loss
+    
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters())
