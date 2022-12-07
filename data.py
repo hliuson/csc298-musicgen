@@ -30,8 +30,11 @@ class MidiTokenDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, index):
         #use music21 to tokenize the midi file
-        midi = music21.converter.parse(self.files[self.indices[index]])
-        notes = midi.flat.getElementsByClass('Note')
+        try:
+            midi = music21.converter.parse(self.files[self.indices[index]])
+            notes = midi.flat.getElementsByClass('Note')
+        except:
+            return None
         
         #128 pitches
         pitches = np.zeros((len(notes)), dtype=np.float32)
@@ -60,15 +63,24 @@ class MidiTokenDataset(torch.utils.data.Dataset):
                 durations[i] = 127
             else:
                 durations[i] = int(note.duration.quarterLength * 8) #at most 128
-            timeNumerator[i] = note.getContextByClass('TimeSignature').numerator #at most 32
-            timeDenominator[i] = note.getContextByClass('TimeSignature').denominator #at most 32
+            sig = note.getContextByClass('TimeSignature')
+            if sig is not None:
+                timeNumerator[i] = sig.numerator
+                timeDenominator[i] = sig.denominator
+            else:
+                timeNumerator[i] = 4
+                timeDenominator[i] = 4 #default to 4/4
             positions[i] = int(note.offset * 8 % 32) #up to 64 1/32nd notes in a bar
             bars[i] = int(note.measureNumber) #support up to 1024 bars
             inst = note.getContextByClass('Instrument')
             instruments[i] = int(0)
             if inst is not None:
                 instruments[i] = int(inst.midiProgram or 0) #up to 128 instruments
-            tempo[i] = int(note.getContextByClass('MetronomeMark').number // 10) #320 / 10 = 32 bins
+            met = note.getContextByClass('MetronomeMark')
+            if met is not None:
+                tempo[i] = int(met.number // 10)
+            else:
+                tempo[i] = 16 #default to 160 bpm
             velocity[i] = int(note.volume.velocity // 4) #127 / 4 = 32 bins
         
         
@@ -83,7 +95,10 @@ class MidiTokenDataset(torch.utils.data.Dataset):
         tempo = torch.from_numpy(tempo).long() #8
         velocity = torch.from_numpy(velocity).long() #9
         
-        minbar = bars.min()
+        if pitches.shape[0] == 0:
+            return None
+        
+        minbar = min(bars)
         bars = bars - minbar
         
         #cap the number of bars at 1024
@@ -101,6 +116,8 @@ class BERTTokenBatcher():
         x_stacked = [None, None, None, None, None, None, None, None, None]
         
         for z in x:
+            if z is None:
+                continue
             for i in range(len(z)):
                 #pad the tensor to be a multiple of max_length
                 padded = torch.nn.functional.pad(z[i], (0, self.max_length - z[i].shape[0] % self.max_length), value=0)
@@ -109,6 +126,9 @@ class BERTTokenBatcher():
                     x_stacked[i] = stacked
                 else:
                     x_stacked[i] = torch.cat((x_stacked[i], stacked), dim=0)
+        
+        if x_stacked[0] is None:
+            return None
         
         return tuple(x_stacked)
        
@@ -136,9 +156,11 @@ def getdatasets(split = 0.9, embedder = None, L=32, embed_length = 128):
     
     return train, test
 
-def midi_dataset(split=0.95):
+def midi_dataset(split=0.95, lakh=False):
     paths = []
     root = "./data/maestro-v3.0.0"
+    if lakh:
+        root = "./data/lmd_full"
     for rt, dirs, files in os.walk(root):
         for file in files:
             if file.endswith(".midi") or file.endswith(".mid"):

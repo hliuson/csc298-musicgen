@@ -27,6 +27,8 @@ def main(*args, **kwargs):
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--workers', type=int, default=1)
     parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--size', type=str, default="small")
+    parser.add_argument('--lakh', type=bool, default=False)
     parser.set_defaults(new=True)
     args = parser.parse_args(args)
     
@@ -37,12 +39,15 @@ def main(*args, **kwargs):
         print("Please specify a save location")
         return
         
-    train, test = midi_dataset()
+    train, test = midi_dataset(lakh=args.lakh)
     
     train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True, num_workers=args.workers, collate_fn=BERTTokenBatcher())
     test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, collate_fn=BERTTokenBatcher())
     
-    model = MidiFormer()
+    if args.size == "small":
+        model = MidiFormer()
+    if args.size == "medium":
+        model = MidiFormer(num_layers=8, num_heads=8, model_dim=256)
     
     wandblogger = pl.loggers.WandbLogger(project="midi-bert")
     wandblogger.watch(model, log="all")

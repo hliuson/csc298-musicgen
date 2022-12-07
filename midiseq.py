@@ -13,7 +13,7 @@ from xformers.factory.model_factory import *
 
 class MidiFormer(pl.LightningModule):
     def __init__(self, num_layers=4, num_heads=4, pitch_size=32, dur_size=32, offset_size=32, time_num_size=16, time_denom_size=16,
-                 bar_size = 32, inst_size = 32, tmp_size = 32, vel_size=32, model_dim = 128) -> None:
+                 bar_size = 32, inst_size = 32, tmp_size = 32, vel_size=32, model_dim = 128, hidden_layer_multiplier=4) -> None:
         super().__init__()
         #save hyperparameters
         self.save_hyperparameters()
@@ -39,15 +39,15 @@ class MidiFormer(pl.LightningModule):
         #1: pad
         
         
-        self.pitch_head = nn.Sequential(nn.Linear(128, 128), nn.Softmax(dim=2))
-        self.dur_head = nn.Sequential(nn.Linear(128, 128), nn.Softmax(dim=2))
-        self.offset_head = nn.Sequential(nn.Linear(128, 64), nn.Softmax(dim=2))
-        self.time_num_head = nn.Sequential(nn.Linear(128, 32), nn.Softmax(dim=2))
-        self.time_denom_head = nn.Sequential(nn.Linear(128, 32), nn.Softmax(dim=2))
-        self.bar_head = nn.Sequential(nn.Linear(128, 1024), nn.Softmax(dim=2))
-        self.inst_head = nn.Sequential(nn.Linear(128, 128), nn.Softmax(dim=2))
-        self.tmp_head = nn.Sequential(nn.Linear(128, 32), nn.Softmax(dim=2))
-        self.vel_head = nn.Sequential(nn.Linear(128, 32), nn.Softmax(dim=2))
+        self.pitch_head = nn.Sequential(nn.Linear(self.hparams.model_dim, 128), nn.Softmax(dim=2))
+        self.dur_head = nn.Sequential(nn.Linear(self.hparams.model_dim, 128), nn.Softmax(dim=2))
+        self.offset_head = nn.Sequential(nn.Linear(self.hparams.model_dim, 64), nn.Softmax(dim=2))
+        self.time_num_head = nn.Sequential(nn.Linear(self.hparams.model_dim, 32), nn.Softmax(dim=2))
+        self.time_denom_head = nn.Sequential(nn.Linear(self.hparams.model_dim, 32), nn.Softmax(dim=2))
+        self.bar_head = nn.Sequential(nn.Linear(self.hparams.model_dim, 1024), nn.Softmax(dim=2))
+        self.inst_head = nn.Sequential(nn.Linear(self.hparams.model_dim, 128), nn.Softmax(dim=2))
+        self.tmp_head = nn.Sequential(nn.Linear(self.hparams.model_dim, 32), nn.Softmax(dim=2))
+        self.vel_head = nn.Sequential(nn.Linear(self.hparams.model_dim, 32), nn.Softmax(dim=2))
         
         #bert is encoder only
         xformer_config = [
@@ -74,7 +74,7 @@ class MidiFormer(pl.LightningModule):
                 "name": "MLP",  
                 "dropout": 0.1  ,
                 "activation": "gelu",
-                "hidden_layer_multiplier": 4, 
+                "hidden_layer_multiplier": self.hparams.hidden_layer_multiplier, 
             },
         }
         ]
@@ -96,8 +96,10 @@ class MidiFormer(pl.LightningModule):
     def BERT_step(self, batch):
         #x is (batch, length, channels)
         #embed pitch and duration
-        pitch, dur, off, tden, tnum, bar, inst, tmp, vel = batch
+        if batch is None:
+            return torch.tensor(0.0) #return 0 loss if batch is empty
         
+        pitch, dur, off, tden, tnum, bar, inst, tmp, vel = batch
         x = torch.cat((self.pitch_embed(pitch),
                        self.dur_embed(dur),
                        self.offset_embed(off),
