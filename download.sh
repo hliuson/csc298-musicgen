@@ -5,4 +5,4 @@ hostname
 date
 source /software/miniconda3/4.12.0/bin/activate CSC298-final
 python3 system.py
-python3 data.py
+python3 clean.py

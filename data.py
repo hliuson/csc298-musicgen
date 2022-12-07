@@ -63,10 +63,15 @@ class MidiTokenDataset(torch.utils.data.Dataset):
             timeNumerator[i] = note.getContextByClass('TimeSignature').numerator #at most 32
             timeDenominator[i] = note.getContextByClass('TimeSignature').denominator #at most 32
             positions[i] = int(note.offset * 8 % 32) #up to 64 1/32nd notes in a bar
-            bars[i] = int(note.measureNumber) #support up to 512 bars
-            instruments[i] = int(note.getContextByClass('Instrument').instrumentName) #128 instruments
+            bars[i] = int(note.measureNumber) #support up to 1024 bars
+            inst = note.getContextByClass('Instrument')
+            instruments[i] = int(0)
+            if inst is not None:
+                instruments[i] = int(inst.midiProgram or 0) #up to 128 instruments
             tempo[i] = int(note.getContextByClass('MetronomeMark').number // 10) #320 / 10 = 32 bins
-            velocity[i] = int(note.velocity // 4) #127 / 4 = 32 bins
+            velocity[i] = int(note.volume.velocity // 4) #127 / 4 = 32 bins
+        
+        
         
         pitches = torch.from_numpy(pitches).long() #1
         durations = torch.from_numpy(durations).long() #2
@@ -77,9 +82,39 @@ class MidiTokenDataset(torch.utils.data.Dataset):
         instruments = torch.from_numpy(instruments).long() #7
         tempo = torch.from_numpy(tempo).long() #8
         velocity = torch.from_numpy(velocity).long() #9
+        
+        minbar = bars.min()
+        bars = bars - minbar
+        
+        #cap the number of bars at 1024
+        bars = torch.clamp(bars, 0, 1023)
         return (pitches, durations, positions, timeDenominator, timeNumerator, bars, instruments, tempo, velocity)
 
+class BERTTokenBatcher():
+    def __call__(self, x):
+        #x should be a list of tuples of tensors
+        #if x is just a tuple, convert it to a list of length 1
+ 
+        if type(x) == tuple:
+            x = [x]
+
+        x_stacked = [None, None, None, None, None, None, None, None, None]
         
+        for z in x:
+            for i in range(len(z)):
+                #pad the tensor to be a multiple of max_length
+                padded = torch.nn.functional.pad(z[i], (0, self.max_length - z[i].shape[0] % self.max_length), value=0)
+                stacked = padded.reshape((-1, self.max_length))
+                if x_stacked[i] is None:
+                    x_stacked[i] = stacked
+                else:
+                    x_stacked[i] = torch.cat((x_stacked[i], stacked), dim=0)
+        
+        return tuple(x_stacked)
+       
+        
+    def __init__(self, max_length=256):
+        self.max_length = max_length        
     
 def getdatasets(split = 0.9, embedder = None, L=32, embed_length = 128):
     root = "./data/maestro-v3.0.0"
@@ -103,11 +138,12 @@ def getdatasets(split = 0.9, embedder = None, L=32, embed_length = 128):
 
 def midi_dataset(split=0.95):
     paths = []
-    for root in ["./data/lmd_full", "./data/maestro-v3.0.0"]:
-        for _, dirs, files in os.walk(root):
-            for file in files:
-                if file.endswith(".midi"):
-                    paths.append(os.path.join(root, file))
+    root = "./data/maestro-v3.0.0"
+    for rt, dirs, files in os.walk(root):
+        for file in files:
+            if file.endswith(".midi") or file.endswith(".mid"):
+                #append full path
+                paths.append(os.path.join(rt, file))
 
     trainidx = np.random.choice(len(paths), int(len(paths) * split), replace=False)
     testidx = np.setdiff1d(np.arange(len(paths)), trainidx)

@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 
 import wandb
 from autoencoder import *
-from data import getdatasets
+from data import *
 from model import *
 from sequence import *
 from midiseq import *
@@ -39,8 +39,8 @@ def main(*args, **kwargs):
         
     train, test = midi_dataset()
     
-    train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
-    test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
+    train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True, num_workers=args.workers, collate_fn=BERTTokenBatcher())
+    test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, collate_fn=BERTTokenBatcher())
     
     model = MidiFormer()
     
