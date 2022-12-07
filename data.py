@@ -62,26 +62,26 @@ class MidiTokenDataset(torch.utils.data.Dataset):
             if note.duration.quarterLength > 0:
                 durations[i] = 127
             else:
-                durations[i] = int(note.duration.quarterLength * 8) #at most 128
+                durations[i] = int(note.duration.quarterLength * 8 or 8) #at most 128
             sig = note.getContextByClass('TimeSignature')
             if sig is not None:
-                timeNumerator[i] = sig.numerator
-                timeDenominator[i] = sig.denominator
+                timeNumerator[i] = sig.numerator or 4
+                timeDenominator[i] = sig.denominator or 4
             else:
                 timeNumerator[i] = 4
                 timeDenominator[i] = 4 #default to 4/4
-            positions[i] = int(note.offset * 8 % 32) #up to 64 1/32nd notes in a bar
-            bars[i] = int(note.measureNumber) #support up to 1024 bars
+            positions[i] = int(note.offset * 8 % 32 or 0) #up to 64 1/32nd notes in a bar
+            bars[i] = int(note.measureNumber or 0) #support up to 1024 bars
             inst = note.getContextByClass('Instrument')
             instruments[i] = int(0)
             if inst is not None:
                 instruments[i] = int(inst.midiProgram or 0) #up to 128 instruments
             met = note.getContextByClass('MetronomeMark')
             if met is not None:
-                tempo[i] = int(met.number // 10)
+                tempo[i] = int(met.number // 10 or 16)
             else:
                 tempo[i] = 16 #default to 160 bpm
-            velocity[i] = int(note.volume.velocity // 4) #127 / 4 = 32 bins
+            velocity[i] = int(note.volume.velocity // 4 or 16) #127 / 4 = 32 bins
         
         
         
@@ -101,8 +101,16 @@ class MidiTokenDataset(torch.utils.data.Dataset):
         minbar = min(bars)
         bars = bars - minbar
         
-        #cap the number of bars at 1024
+        #clamp the values to be within the range of the vocabulary
+        pitches = torch.clamp(pitches, 0, 127)
+        durations = torch.clamp(durations, 0, 127)
+        positions = torch.clamp(positions, 0, 31)
+        timeDenominator = torch.clamp(timeDenominator, 0, 31)
+        timeNumerator = torch.clamp(timeNumerator, 0, 31)
         bars = torch.clamp(bars, 0, 1023)
+        instruments = torch.clamp(instruments, 0, 127)
+        tempo = torch.clamp(tempo, 0, 31)
+        velocity = torch.clamp(velocity, 0, 31)
         return (pitches, durations, positions, timeDenominator, timeNumerator, bars, instruments, tempo, velocity)
 
 class BERTTokenBatcher():

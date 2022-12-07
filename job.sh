@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --partition=preempt --time=1-00:00:00  --output=./out/octobert-med.log 
-#SBATCH --mem=150G --gres=gpu:12 -c 20
+#SBATCH --mem=175G --gres=gpu:12 -c 20
 hostname
 date
 module load cuda
