@@ -40,23 +40,81 @@ class MidiTokenDataset(torch.utils.data.Dataset):
         #A quarter note has duration 1 in midi, under our quantization scheme, a quarter note has duration 8
         durations = np.zeros((len(notes)), dtype=np.int32)
         
-        #
-        positions = np.zeros((len(notes)), dtype=np.int32)
+        #offset from bar start, quantized to 1/32nd note resolution
+        positions = np.zeros((len(notes)), dtype=np.int32) 
+        
+        #a bar is no longer than two whole notes: so 64 1/32nd notes
+        bars = np.zeros((len(notes)), dtype=np.int32)
+        timeNumerator = np.zeros((len(notes)), dtype=np.int32)
+        timeDenominator = np.zeros((len(notes)), dtype=np.int32)
+        instruments = np.zeros((len(notes)), dtype=np.int32)
+        tempo = np.zeros((len(notes)), dtype=np.float32) #tempo almost certainly less than 320. Discretize into 32 bins.
+        
+        #velocity is between 0 and 127, we break that range up into 32 bins
+        velocity = np.zeros((len(notes)), dtype=np.float32)
+        
         
         for i, note in enumerate(notes):
-            pitches[i] = note.pitch.midi
+            pitches[i] = note.pitch.midi #at most 128
             if note.duration.quarterLength > 0:
                 durations[i] = 127
             else:
-                durations[i] = int(note.duration.quarterLength * 8)
-            positions[i] = int(note.offset * 8) #quantize to 1/32nd note resolution
+                durations[i] = int(note.duration.quarterLength * 8) #at most 128
+            timeNumerator[i] = note.getContextByClass('TimeSignature').numerator #at most 32
+            timeDenominator[i] = note.getContextByClass('TimeSignature').denominator #at most 32
+            positions[i] = int(note.offset * 8 % 32) #up to 64 1/32nd notes in a bar
+            bars[i] = int(note.measureNumber) #support up to 1024 bars
+            inst = note.getContextByClass('Instrument')
+            instruments[i] = int(0)
+            if inst is not None:
+                instruments[i] = int(inst.midiProgram or 0) #up to 128 instruments
+            tempo[i] = int(note.getContextByClass('MetronomeMark').number // 10) #320 / 10 = 32 bins
+            velocity[i] = int(note.volume.velocity // 4) #127 / 4 = 32 bins
         
-        pitches = torch.from_numpy(pitches).float()
-        durations = torch.from_numpy(durations).float() 
-        positions = torch.from_numpy(positions).float() 
-        return (pitches, durations, positions)
+        
+        
+        pitches = torch.from_numpy(pitches).long() #1
+        durations = torch.from_numpy(durations).long() #2
+        positions = torch.from_numpy(positions).long() #3
+        timeDenominator = torch.from_numpy(timeDenominator).long() #4
+        timeNumerator = torch.from_numpy(timeNumerator).long() #5
+        bars = torch.from_numpy(bars).long() #6
+        instruments = torch.from_numpy(instruments).long() #7
+        tempo = torch.from_numpy(tempo).long() #8
+        velocity = torch.from_numpy(velocity).long() #9
+        
+        minbar = bars.min()
+        bars = bars - minbar
+        
+        #cap the number of bars at 1024
+        bars = torch.clamp(bars, 0, 1023)
+        return (pitches, durations, positions, timeDenominator, timeNumerator, bars, instruments, tempo, velocity)
 
+class BERTTokenBatcher():
+    def __call__(self, x):
+        #x should be a list of tuples of tensors
+        #if x is just a tuple, convert it to a list of length 1
+ 
+        if type(x) == tuple:
+            x = [x]
+
+        x_stacked = [None, None, None, None, None, None, None, None, None]
         
+        for z in x:
+            for i in range(len(z)):
+                #pad the tensor to be a multiple of max_length
+                padded = torch.nn.functional.pad(z[i], (0, self.max_length - z[i].shape[0] % self.max_length), value=0)
+                stacked = padded.reshape((-1, self.max_length))
+                if x_stacked[i] is None:
+                    x_stacked[i] = stacked
+                else:
+                    x_stacked[i] = torch.cat((x_stacked[i], stacked), dim=0)
+        
+        return tuple(x_stacked)
+       
+        
+    def __init__(self, max_length=256):
+        self.max_length = max_length        
     
 def getdatasets(split = 0.9, embedder = None, L=32, embed_length = 128):
     root = "./data/maestro-v3.0.0"
@@ -79,13 +137,6 @@ def getdatasets(split = 0.9, embedder = None, L=32, embed_length = 128):
     return train, test
 
 def midi_dataset(split=0.95):
-    root = "./data/maestro-v3.0.0"
-    paths = []
-    for root, dirs, files in os.walk(root):
-        for file in files:
-            if file.endswith(".midi"):
-                paths.append(os.path.join(root, file))
-
     trainidx = np.random.choice(len(paths), int(len(paths) * split), replace=False)
     testidx = np.setdiff1d(np.arange(len(paths)), trainidx)
     
@@ -93,14 +144,13 @@ def midi_dataset(split=0.95):
     test = MidiTokenDataset(paths, testidx)
     
     return train, test
-
 def download_lakh():
     #Load MAESTRO dataset into folder structure
     #This file is in: /home/username/....
     #We want: /scratch/username/....
     
     
-    datapath = "/home/hliuson/data"
+    datapath = "/scratch/dchien/data"
     _ = muspy.datasets.LakhMIDIDataset(root=datapath, download_and_extract=True)
     return getdatasets()
 

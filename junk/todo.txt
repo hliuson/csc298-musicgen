@@ -1,0 +1,22 @@
+Accomplished:
+- High accuracy autoencoder 
+  - want to bring dimension down
+
+Milestones:
+- Get full generative model working
+    - Autoregressive sequence model trained on embeddings
+    - LSTM, RNN, or transformer most likely
+
+
+Minor Tasks:
+- Sanity check the autoencoder
+- 
+
+Misc Ramblings:
+We want to preserve the sequence structure of the task while also compressing it down into fewer time tokens.
+We could do this a number of ways like via convolutions but this is also a kind of "convolution" in the sense 
+that it is a local operation
+
+Important to prevent backwards of information.
+
+Currently: Take Nx128 pianorolls and split it into (N/32) x 128 chunks which can be fed into the autoencoder
