@@ -6,14 +6,13 @@ import pytorch_lightning as pl
 import wandb
 from PIL import Image as PILImage
 import numpy as np
-from autoencoder import *
-from infer import *
 from xformers.factory.model_factory import *
 
 
 class MidiFormer(pl.LightningModule):
     def __init__(self, num_layers=4, num_heads=4, pitch_size=32, dur_size=32, offset_size=32, time_num_size=16, time_denom_size=16,
-                 bar_size = 32, inst_size = 32, tmp_size = 32, vel_size=32, model_dim = 128, hidden_layer_multiplier=4) -> None:
+                 bar_size = 32, inst_size = 32, tmp_size = 32, vel_size=32, model_dim = 128, hidden_layer_multiplier=4,
+                 lr=1e-3) -> None:
         super().__init__()
         #save hyperparameters
         self.save_hyperparameters()
@@ -33,10 +32,11 @@ class MidiFormer(pl.LightningModule):
         self.mixer = nn.Sequential(nn.Linear(self.hparams.pitch_size + self.hparams.dur_size + self.hparams.offset_size + self.hparams.time_num_size + self.hparams.time_denom_size
                                              + self.hparams.bar_size + self.hparams.inst_size + self.hparams.tmp_size + self.hparams.vel_size, self.hparams.model_dim), nn.ReLU())
         
-        #represents special tokens (pad, mask)
-        self.special_tokens = nn.Embedding(2, self.hparams.model_dim)
-        #0: mask
-        #1: pad
+        #represents special tokens (none, pad, mask)
+        self.special_tokens = nn.Embedding(3, self.hparams.model_dim)
+        #0: none
+        #1: mask
+        #2: pad
         
         
         self.pitch_head = nn.Sequential(nn.Linear(self.hparams.model_dim, 128), nn.Softmax(dim=2))
@@ -99,7 +99,7 @@ class MidiFormer(pl.LightningModule):
         if batch is None:
             return torch.tensor(0.0) #return 0 loss if batch is empty
         
-        pitch, dur, off, tden, tnum, bar, inst, tmp, vel = batch
+        pitch, dur, off, tden, tnum, bar, inst, tmp, vel, spec = batch
         x = torch.cat((self.pitch_embed(pitch),
                        self.dur_embed(dur),
                        self.offset_embed(off),
@@ -112,22 +112,10 @@ class MidiFormer(pl.LightningModule):
         
         assert x.shape[0]*x.shape[1]*x.shape[2] != 0, "x is empty"
         
-        #where x is all zero
-        pad_mask = (x.sum(dim=2) == 0).long()
-        
         x = self.mixer(x)
-        
-        #[0,1] mask for each token in sequence
-        mask = (torch.rand((x.shape[0], x.shape[1]), device=self.device) < 0.8).long() #mwhen random number is less than 0.8, keep the note
-        #Mask out notes according to mask
-        x = x*mask.unsqueeze(-1)
-        #Add embedding of MASK token where mask is 0
-        MASK = self.special_tokens(torch.zeros((x.shape[0], x.shape[1]), device=self.device).long())*((1-mask).unsqueeze(-1))
-        x = x + MASK
-        
-        x = x*(1-pad_mask.unsqueeze(-1)) #set pad tokens to 0
-        x = x + self.special_tokens(torch.ones((x.shape[0], x.shape[1]), device=self.device).long())*((1-pad_mask).unsqueeze(-1)) #add embedding of pad token where pad_mask is 1
-        
+        special = self.special_tokens(spec)
+        #override x with special tokens where spec != 0, in a differentiable way
+        x = x*(spec == 0).unsqueeze(-1).float() + special*(spec != 0).unsqueeze(-1).float()
         
         
         y = self.transformer(x)
@@ -147,4 +135,4 @@ class MidiFormer(pl.LightningModule):
         return loss
     
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters())
+        return torch.optim.Adam(self.parameters(), lr = self.hparams.lr)

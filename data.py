@@ -10,15 +10,6 @@ import numpy as np
 ### Define a dataset class in torch.utils.data.Dataset format.
 ### Data is stored as .midi files in a folder structure.
 ### The dataset class will need to convert the .midi files to pianoroll format using muspy.
-
-class MidiDataset(torch.utils.data.Dataset):
-    def __init__(self, files, indices):
-        self.files = files
-        self.indices = indices
-    def __len__(self):
-        return len(self.indices)
-    def __getitem__(self, index):
-        return muspy.outputs.pianoroll.to_pianoroll_representation(muspy.read(self.files[self.indices[index]]))
   
 class MidiTokenDataset(torch.utils.data.Dataset):
     def __init__(self, files, indices):
@@ -56,13 +47,20 @@ class MidiTokenDataset(torch.utils.data.Dataset):
         #velocity is between 0 and 127, we break that range up into 32 bins
         velocity = np.zeros((len(notes)), dtype=np.float32)
         
+        #0: no special token, 1: mask, 2: pad
+        specialtoken = np.zeros((len(notes)), dtype=np.int32)
+        
+        cumulativeOffset = 0
+        #4/4
+        lastBar = 0
+        lastTimeSignature = 4 / 4
         
         for i, note in enumerate(notes):
             pitches[i] = note.pitch.midi #at most 128
-            if note.duration.quarterLength > 0:
-                durations[i] = 127
-            else:
+            if note.duration is not None:
                 durations[i] = int(note.duration.quarterLength * 8 or 8) #at most 128
+            else:
+                durations[i] = 8 #default to quarter note
             sig = note.getContextByClass('TimeSignature')
             if sig is not None:
                 timeNumerator[i] = sig.numerator or 4
@@ -70,8 +68,16 @@ class MidiTokenDataset(torch.utils.data.Dataset):
             else:
                 timeNumerator[i] = 4
                 timeDenominator[i] = 4 #default to 4/4
-            positions[i] = int(note.offset * 8 % 32 or 0) #up to 64 1/32nd notes in a bar
+                
             bars[i] = int(note.measureNumber or 0) #support up to 1024 bars
+            if bars[i] != lastBar:
+                barDiff = bars[i] - lastBar
+                cumulativeOffset += barDiff * lastTimeSignature * 4
+                lastBar = bars[i]
+                lastTimeSignature = timeNumerator[i] / timeDenominator[i]
+                
+            positions[i] = int(((note.offset or 0)  - cumulativeOffset)*8) #up to 64 1/32nd notes in a bar
+                
             inst = note.getContextByClass('Instrument')
             instruments[i] = int(0)
             if inst is not None:
@@ -111,7 +117,7 @@ class MidiTokenDataset(torch.utils.data.Dataset):
         instruments = torch.clamp(instruments, 0, 127)
         tempo = torch.clamp(tempo, 0, 31)
         velocity = torch.clamp(velocity, 0, 31)
-        return (pitches, durations, positions, timeDenominator, timeNumerator, bars, instruments, tempo, velocity)
+        return (pitches, durations, positions, timeDenominator, timeNumerator, bars, instruments, tempo, velocity, specialtoken)
 
 class BERTTokenBatcher():
     def __call__(self, x):
@@ -121,14 +127,19 @@ class BERTTokenBatcher():
         if type(x) == tuple:
             x = [x]
 
-        x_stacked = [None, None, None, None, None, None, None, None, None]
+        x_stacked = [None, None, None, None, None, None, None, None, None, None]
         
         for z in x:
             if z is None:
                 continue
             for i in range(len(z)):
                 #pad the tensor to be a multiple of max_length
-                padded = torch.nn.functional.pad(z[i], (0, self.max_length - z[i].shape[0] % self.max_length), value=0)
+                if i == 9: #special token
+                    #randomly mask 15% of the tokens
+                    masked = (torch.rand(z[i].shape[0]) < 0.15).long()
+                    padded = torch.nn.functional.pad(masked, (0, self.max_length - masked.shape[0] % self.max_length), value=2)
+                else:
+                    padded = torch.nn.functional.pad(z[i], (0, self.max_length - z[i].shape[0] % self.max_length), value=0)
                 stacked = padded.reshape((-1, self.max_length))
                 if x_stacked[i] is None:
                     x_stacked[i] = stacked
@@ -137,32 +148,88 @@ class BERTTokenBatcher():
         
         if x_stacked[0] is None:
             return None
+        #take the minimum of the positions in each batch
+        mins, _ = torch.min(x_stacked[5], dim=1, keepdim=True)
+        x_stacked[5] = x_stacked[5] - mins
         
         return tuple(x_stacked)
        
         
     def __init__(self, max_length=256):
-        self.max_length = max_length        
+        self.max_length = max_length     
+        
+def midi(x):
+    print(x)
+    #x is a tuple of ten tensors: pitches, durations, positions, timeDenominator, timeNumerator, bars, instruments, tempo, velocity, specialtoken
+    pitches, durations, positions, timeDenominator, timeNumerator, bars, instruments, tempo, velocity, specialtoken = x
+    #if we have more than one example in the batch, just take the first one
+    if len(pitches.shape) > 2:
+        pitches = pitches[0]
+        durations = durations[0]
+        positions = positions[0]
+        timeDenominator = timeDenominator[0]
+        timeNumerator = timeNumerator[0]
+        bars = bars[0]
+        instruments = instruments[0]
+        tempo = tempo[0]
+        velocity = velocity[0]
+        specialtoken = specialtoken[0]
     
-def getdatasets(split = 0.9, embedder = None, L=32, embed_length = 128):
-    root = "./data/maestro-v3.0.0"
-    paths = []
-    for root, dirs, files in os.walk(root):
-        for file in files:
-            if file.endswith(".midi"):
-                paths.append(os.path.join(root, file))
+    #then use music21 to convert to midi
+    str_rep = ""
+    
+    s = music21.stream.Stream()
+    s.timeSignature = music21.meter.TimeSignature(str(timeNumerator[0]) + "/" + str(timeDenominator[0]))
+    lastBar = 0
+    lastTimesig = s.timeSignature
+    cumOffset = 0
+    bar = music21.stream.Measure()
+    bar.timeSignature = lastTimesig
+    lastTempo = music21.tempo.MetronomeMark(number=tempo[0] * 10)
+    str_rep += "<Tempo: " + str(lastTempo.number) + "> "
+    str_rep += str(lastTimesig.numerator) + "/" + str(lastTimesig.denominator) + " "
+    s.append(lastTempo)
+    for i in range(pitches.shape[0]):
+        print("Processing token...")
+        
+        if specialtoken[i].item() == 1:
+            str_rep += "<MASK> "
+            continue
+        if specialtoken[i].item() == 2:
+            str_rep += "<PAD> "
+            continue
+        n = music21.note.Note(pitches[i].item())
+        n.quarterLength = durations[i].item() / 8
+        if bars[i].item() != lastBar:
+            barDiff = bars[i].item() - lastBar
+            lastBar = bars[i].item()
+            
+            for j in range(barDiff - 1):
+                s.append(bar)
+                str_rep += "| "
+                bar = music21.stream.Measure()
+                bar.timeSignature = lastTimesig
+                cumOffset += bar.barDuration.quarterLength
+                bar.offset = cumOffset
+                bar.tempo = tempo[i].item() * 10
+                
+            lastTimesig = music21.meter.TimeSignature(str(timeNumerator[i].item()) + "/" + str(timeDenominator[i].item()))
 
-    trainidx = np.random.choice(len(paths), int(len(paths) * split), replace=False)
-    testidx = np.setdiff1d(np.arange(len(paths)), trainidx)
+        if lastTempo.number != tempo[i].item() * 10:
+            lastTempo = music21.tempo.MetronomeMark(number=tempo[i].item() * 10)
+            bar.append(lastTempo)
+            str_rep += "<tempo: " + str(tempo[i].item() * 10) + "> "
+        
+        n.offset = positions[i].item() / 8
+        n.volume.velocity = velocity[i].item() * 10
+        n.storedInstrument = music21.instrument.fromString(instruments[i].item())
+        bar.append(n)
+        str_rep += str(n.pitch.nameWithOctave) + " "
+        
+    s.append(bar)
+    print(str_rep)
+    return s
     
-    train = MidiDataset(paths, trainidx)
-    test = MidiDataset(paths, testidx)
-    
-    if embedder is not None:
-        train = EncoderDataset(train, embedder)
-        test = EncoderDataset(test, embedder)
-    
-    return train, test
 
 def midi_dataset(split=0.95, lakh=False):
     paths = []
@@ -192,56 +259,3 @@ def download_lakh():
     datapath = "/home/hliuson/data"
     _ = muspy.datasets.LakhMIDIDataset(root=datapath, download_and_extract=True)
     return getdatasets()
-
-#Use the sequence embedder to preprocess the data and save it to disk
-#The sequence embedder takes a sequence of length N and returns a sequence of length N//L.
-class EncoderDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, embedder, L=32, embed_dim=128, MAX_LEN=256):
-        self.dataset = dataset
-        self.embedder = embedder.to("cpu")
-        self.L = L
-        self.embed_dim = embed_dim
-        
-        self.MAX_LEN = MAX_LEN
-
-    def __len__(self):
-        return len(self.dataset)
-    
-    def __getitem__(self, index):
-        #partition the sequence into L-length chunks
-        seq = self.dataset[index]
-        L = self.L
-        N = seq.shape[0]
-
-        #pad the sequence with zeros if it is not a multiple of L
-        seq = np.pad(seq, ((0, L - (N % L)), (0, 0)), mode="constant")
-        
-        #reshape the sequence into a 3D tensor of shape (num_chunks, L, 128)
-        seq = seq.reshape((-1, L, self.embed_dim))
-        
-        #cast the sequence to a torch tensor
-        seq = torch.tensor(seq, dtype=torch.float32)
-        
-        #embed the sequence
-        with torch.no_grad():
-            seq = self.embedder.encode(seq)
-        
-        #reshape the sequence into a 2D tensor of shape (num_chunks * L, 128)
-        seq = seq.reshape((-1, self.embed_dim))
-        
-        #choose random subsequence of length MAX_LEN if the sequence is longer than MAX_LEN
-        if seq.shape[0] > self.MAX_LEN:
-            start = np.random.randint(0, seq.shape[0] - self.MAX_LEN)
-            seq = seq[start:start+self.MAX_LEN]
-        
-        return seq
-        
-    
-def main():
-    train, test = download_lakh()
-    print(len(train), len(test))
-    print(train[0].shape)
-    print(test[0].shape)
-
-if __name__ == "__main__":
-    main()
