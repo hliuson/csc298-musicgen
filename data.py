@@ -55,7 +55,10 @@ class MidiTokenDataset(torch.utils.data.Dataset):
         #4/4
         lastBar = 0
         ts = notes[0].getContextByClass('TimeSignature')
-        lastTimeSignature = ts.numerator / ts.denominator
+        if ts is not None:
+            lastTimeSignature = (ts.numerator or 4)  / (ts.denominator or 4)
+        else:
+            lastTimeSignature = 1 #default to 4/4
         
         print("Beginning tokenization")
         for i, note in enumerate(notes):
