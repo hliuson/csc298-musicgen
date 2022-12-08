@@ -21,6 +21,7 @@ class MidiTokenDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, index):
         #use music21 to tokenize the midi file
+        print("Beginning parse")
         try:
             midi = music21.converter.parse(self.files[self.indices[index]])
             notes = midi.flat.getElementsByClass('Note')
@@ -53,9 +54,12 @@ class MidiTokenDataset(torch.utils.data.Dataset):
         cumulativeOffset = 0
         #4/4
         lastBar = 0
-        lastTimeSignature = 4 / 4
+        ts = notes[0].getContextByClass('TimeSignature')
+        lastTimeSignature = ts.numerator / ts.denominator
         
+        print("Beginning tokenization")
         for i, note in enumerate(notes):
+            print("tokenizing note " + str(i) +" of " + str(len(notes)))
             pitches[i] = note.pitch.midi #at most 128
             if note.duration is not None:
                 durations[i] = int(note.duration.quarterLength * 8 or 8) #at most 128
@@ -117,6 +121,11 @@ class MidiTokenDataset(torch.utils.data.Dataset):
         instruments = torch.clamp(instruments, 0, 127)
         tempo = torch.clamp(tempo, 0, 31)
         velocity = torch.clamp(velocity, 0, 31)
+        
+        #ensure deletion to avoid memory leak
+        del midi
+        del notes
+        
         return (pitches, durations, positions, timeDenominator, timeNumerator, bars, instruments, tempo, velocity, specialtoken)
 
 class BERTTokenBatcher():
@@ -189,6 +198,9 @@ def midi(x):
     str_rep += "<Tempo: " + str(lastTempo.number) + "> "
     str_rep += str(lastTimesig.numerator) + "/" + str(lastTimesig.denominator) + " "
     s.append(lastTempo)
+    #sort the tokens by bar, then position
+    pitches, durations, positions, timeDenominator, timeNumerator, bars, instruments, tempo, velocity, specialtoken = zip(*sorted(zip(pitches, durations, positions, timeDenominator, timeNumerator, bars, instruments, tempo, velocity, specialtoken), key=lambda x: (x[5], x[2])))
+    
     for i in range(pitches.shape[0]):
         print("Processing token...")
         
