@@ -1,6 +1,0 @@
-Agenda:
- - Download Lakh dataset
-
-Train:
- - Transformer on Note or Event representation
- - Fine-tune transformer + autoencoder together?
